@@ -1,0 +1,31 @@
+{% load static %}
+<div id="video-wrap" style="max-width: 960px">
+  <video id="video" controls playsinline style="width: 100%;"></video>
+  <div style="margin:8px 0">
+    <label>Качество:</label>
+    <select id="quality"></select>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script>
+(function(){
+  const src = "{{ hls_url }}";
+  const video = document.getElementById('video');
+  const sel = document.getElementById('quality');
+  if (Hls.isSupported()) {
+    const hls = new Hls();
+    hls.loadSource(src);
+    hls.attachMedia(video);
+    hls.on(Hls.Events.MANIFEST_PARSED, function() {
+      sel.innerHTML = '';
+      const auto = document.createElement('option'); auto.value = '-1'; auto.text = 'Auto'; sel.appendChild(auto);
+      hls.levels.forEach((lvl, i) => { const o = document.createElement('option'); o.value = i; o.text = (lvl.height||'?') + 'p'; sel.appendChild(o);});
+      sel.addEventListener('change', () => { hls.currentLevel = parseInt(sel.value, 10); });
+    });
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = src;
+  } else {
+    document.getElementById('video-wrap').innerHTML = '<p>Your browser does not support HLS.</p>';
+  }
+})();
+</script>

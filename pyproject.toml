@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling>=1.21.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "django-hlsfield"
+version = "0.1.3"
+description = "Django VideoField + HLSVideoField: metadata, preview frame, automatic HLS, JSON sidecar, Celery optional."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "akula993", email = "akula993@gmail.com" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Django",
+    "Framework :: Django :: 4.2",
+    "Framework :: Django :: 5",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Internet :: WWW/HTTP",
+]
+
+dependencies = ["Django>=4.2"]
+
+[project.optional-dependencies]
+celery = ["celery>=5.3"]
+preview = ["Pillow>=10.0.0"]
+magic = ["python-magic>=0.4.27"]
+s3 = ["boto3>=1.34"]
+
+[project.urls]
+Homepage = "https://github.com/akula993/django-hlsfield"
+Issues = "https://github.com/akula993/django-hlsfield/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hlsfield"]
+include = [
+    "src/hlsfield/templates/**",
+]
