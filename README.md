@@ -1,305 +1,297 @@
-# django-hlsfield (черновик)
+# django-hlsfield
 
-**Цель**: Сделать два поля для Django:
+[![PyPI version](https://badge.fury.io/py/django-hlsfield.svg)](https://badge.fury.io/py/django-hlsfield)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Django 4.2+](https://img.shields.io/badge/django-4.2+-green.svg)](https://www.djangoproject.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-* `VideoField` — хранит оригинал, автоматически извлекает метаданные (длительность/размер кадра), делает превью-кадр.
-* `HLSVideoField(VideoField)` — наследуется от `VideoField` и **автоматизирует** генерацию HLS (варианты качества,
-  master.m3u8), чтобы фронтенд мог выбирать качество без дублирования полноразмерных файлов.
+🎥 **Автоматическое создание адаптивного видео для Django**
 
-Особенности:
+Django-библиотека для автоматической обработки видео с генерацией HLS/DASH стримов, превью и метаданных. Просто загрузите видео — получите адаптивный стрим с выбором качества!
 
-* ffmpeg/ffprobe через `subprocess`.
-* Генерация превью-кадра (jpg/png) на указанной секунде.
-* Хранение метаданных в полях модели (`DurationField`, `width`, `height`) + путь к `master.m3u8`.
-* Построено под асинхронную обработку через Celery (тяжёлая перекодировка уходит в задачу). Есть синхронный «fallback»
-  на случай отсутствия Celery.
-* Работа с любым `Storage` (в т.ч. S3): все вычисления в temp-директории, потом — заливка артефактов в хранилище.
+## ✨ Возможности
 
-> **Требования**: установленный `ffmpeg`/`ffprobe` в PATH или указать пути в Django settings.
+- 📹 **VideoField** — базовое поле с извлечением метаданных и превью
+- 🎬 **HLSVideoField** — автоматическая генерация HLS с несколькими качествами
+- 📺 **DASHVideoField** — DASH стриминг для современных браузеров
+- 🌐 **AdaptiveVideoField** — HLS + DASH одновременно для максимальной совместимости
+- ☁️ **Любые Storage** — работает с локальными файлами, S3, MinIO
+- ⚡ **Celery + синхронный режим** — быстрая загрузка + фоновая обработка
+- 🎛️ **Готовые плееры** — HTML5 плееры с выбором качества
 
----
+## 🚀 Быстрый старт
 
-## Структура пакета
+### Установка
 
-```
-apps/
-  hlsfield/
-    __init__.py
-    fields.py          # VideoField, HLSVideoField
-    utils.py           # ffprobe/ffmpeg helpers, temp utils
-    widgets.py         # Превью в админке
-    tasks.py           # Celery задача: генерация HLS
-    players/
-      hls_player.html  # Пример шаблона с hls.js
+```bash
+pip install django-hlsfield
 ```
 
----
+**Требования:** ffmpeg и ffprobe должны быть установлены в системе
 
-## settings.py (пример)
+### Настройка
 
 ```python
-# Пути к бинарям (опционально)
-HLSFIELD_FFPROBE = r"ffprobe"  # или полный путь
-HLSFIELD_FFMPEG = r"ffmpeg"  # или полный путь
+# settings.py
+INSTALLED_APPS = [
+    # ...
+    'hlsfield',
+]
 
-# Лестница качеств по умолчанию (h x video_bitrate_kbps)
+# Опционально: пути к бинарям
+HLSFIELD_FFMPEG = "ffmpeg"   # или полный путь
+HLSFIELD_FFPROBE = "ffprobe"
+
+# Качества видео (по умолчанию)
 HLSFIELD_DEFAULT_LADDER = [
-    {"height": 240, "v_bitrate": 300, "a_bitrate": 64},
     {"height": 360, "v_bitrate": 800, "a_bitrate": 96},
-    {"height": 480, "v_bitrate": 1200, "a_bitrate": 96},
     {"height": 720, "v_bitrate": 2500, "a_bitrate": 128},
     {"height": 1080, "v_bitrate": 4500, "a_bitrate": 160},
 ]
-
-# HLS сегментация
-HLSFIELD_SEGMENT_DURATION = 6  # секунд
 ```
 
-## Заметки по продакшену
+## 📝 Примеры использования
 
-* **Кодеки**: для совместимости используем H.264/AAC. Если нужен HEVC/AV1 — добавьте флаги в
-  `utils.transcode_hls_variants`.
-* **S3/MinIO**: будет работать «из коробки», так как все артефакты сохраняются через `storage.save()`.
-* **Без дублирования**: оригинал хранится один; фронтенд воспроизводит HLS, набор «кусков» на разных битрейтах — это не
-  «полные копии», а сегменты для адаптивного стриминга.
-* **Транскодирование в фоне**: используйте Celery + отдельный воркер. В админке/вью можно показать статус
-  `hls_built_at`.
-* **Очистка**: по сигналу `post_delete` модели удаляйте оригинал и директорию HLS-артефактов (реализуйте при
-  необходимости).
-* **Безопасность**: для приватного доступа отдавайте HLS через подписанные URL (S3, Nginx/X-Accel, CloudFront).
-
----
-
-## TODO / Идеи
-
-* Валидация MIME через `python-magic`.
-* Генерация WebVTT-сабов для предпросмотра (sprite) и таймкодов.
-* Генерация DASH (mpd) параллельно HLS.
-* Пул воркеров ffmpeg, лимиты CPU/GPU.
-
-````
-# settings.py
-HLSFIELD_DEFAULT_UPLOAD_TO = "hlsfield.upload_to.video_upload_to"
-HLSFIELD_SIDECAR_LAYOUT = "nested"  # по умолчанию и так nested в моём примере
-
-
-
----
-
-## Быстрый старт: Model + Admin + Views + URLs + Templates
-
-Ниже — минимальный набор кода, чтобы **сразу загрузить видео** и посмотреть HLS в браузере без плясок с бубном.
-
-> Предполагаем, что пакет `django-hlsfield` уже установлен, а в системе есть `ffmpeg/ffprobe` в PATH.
-
-### 0) settings.py
-```python
-INSTALLED_APPS = [
-    # ...
-    "django.contrib.staticfiles",
-    "hlsfield",   # наше приложение-пакет
-    "video",      # ваше app с моделью Lecture
-]
-
-MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
-
-# (опционально) указать явные пути к бинарям
-HLSFIELD_FFPROBE = "ffprobe"
-HLSFIELD_FFMPEG  = "ffmpeg"
-````
-
-### 1) models.py
+### 1. Простое видео с метаданными
 
 ```python
+# models.py
 from django.db import models
-from hlsfield.fields import HLSVideoField
+from hlsfield import VideoField
 
+class Video(models.Model):
+    title = models.CharField(max_length=200)
+    video = VideoField(
+        upload_to="videos/",
+        duration_field="duration",      # автозаполнение длительности
+        width_field="width",            # ширина кадра
+        height_field="height",          # высота кадра
+        preview_field="preview_image"   # путь к превью
+    )
+
+    # Поля для метаданных (опционально)
+    duration = models.DurationField(null=True, blank=True)
+    width = models.PositiveIntegerField(null=True, blank=True)
+    height = models.PositiveIntegerField(null=True, blank=True)
+    preview_image = models.CharField(max_length=500, null=True, blank=True)
+
+# Использование
+video = Video.objects.get(pk=1)
+print(f"Длительность: {video.duration}")
+print(f"Разрешение: {video.width}x{video.height}")
+print(f"Превью: {video.video.preview_url()}")
+```
+
+### 2. HLS адаптивное видео
+
+```python
+# models.py
+from hlsfield import HLSVideoField
 
 class Lecture(models.Model):
-    title = models.CharField(max_length=255)
-    video = HLSVideoField(upload_to="videos/", hls_playlist_field="hls_master")
+    title = models.CharField(max_length=200)
+    video = HLSVideoField(
+        upload_to="lectures/",
+        hls_playlist_field="hls_master"  # поле для master.m3u8
+    )
     hls_master = models.CharField(max_length=500, null=True, blank=True)
 
-    def __str__(self):
-        return self.title
-```
-
-### 2) admin.py
-
-```python
-from django.contrib import admin
-from .models import Lecture
-
-
-@admin.register(Lecture)
-class LectureAdmin(admin.ModelAdmin):
-    list_display = ("id", "title")
-```
-
-> Можно красиво врезать плеер и в админке, если захотите, через `hlsfield.widgets.AdminVideoWidget`.
-
-### 3) views.py (в app `video`)
-
-```python
-from django.shortcuts import redirect
-from django.urls import reverse
-from django.views.generic import ListView, DetailView, CreateView
-from django import forms
-from .models import Lecture
-
-
-class LectureForm(forms.ModelForm):
-    class Meta:
-        model = Lecture
-        fields = ["title", "video"]
-
-
-class LectureCreateView(CreateView):
-    model = Lecture
-    form_class = LectureForm
-    template_name = "video/upload.html"
-
-    def get_success_url(self):
-        return reverse("video:detail", args=[self.object.pk])
-
-
-class LectureDetailView(DetailView):
-    model = Lecture
-    template_name = "video/detail.html"
-
-
-class LectureListView(ListView):
-    model = Lecture
-    template_name = "video/list.html"
-    paginate_by = 20
-```
-
-### 4) urls.py (в app `video`)
-
-```python
-from django.urls import path
-from .views import LectureCreateView, LectureDetailView, LectureListView
-
-app_name = "video"
-
-urlpatterns = [
-    path("upload/", LectureCreateView.as_view(), name="upload"),
-    path("<int:pk>/", LectureDetailView.as_view(), name="detail"),
-    path("", LectureListView.as_view(), name="list"),
-]
-```
-
-### 5) Корневой urls.py (проекта)
-
-```python
-from django.contrib import admin
-from django.urls import path, include
-from django.conf import settings
-from django.conf.urls.static import static
-
-urlpatterns = [
-    path("admin/", admin.site.urls),
-    path("", include("video.urls", namespace="video")),
-]
-
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-```
-
-### 6) Шаблоны
-
-Создайте папки:
-
-```
-video/templates/video/
-```
-
-**`video/templates/video/base.html`** (примитивный каркас)
-
-```html
-<!doctype html>
-<html lang="ru">
-<head>
-    <meta charset="utf-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1"/>
-    <title>{% block title %}Видео{% endblock %}</title>
-    <style>body {
-        font-family: system-ui, sans-serif;
-        margin: 2rem auto;
-        max-width: 960px
-    }</style>
-</head>
-<body>
-<nav><a href="{% url 'video:list' %}">Список</a> · <a href="{% url 'video:upload' %}">Загрузить</a></nav>
-<hr/>
-{% block content %}{% endblock %}
-</body>
-</html>
-```
-
-**`video/templates/video/upload.html`**
-
-```html
-{% extends "video/base.html" %}
-{% block title %}Загрузка{% endblock %}
-{% block content %}
-<h1>Загрузить видео</h1>
-<form method="post" enctype="multipart/form-data">
-    {% csrf_token %}
-    {{ form.as_p }}
-    <button type="submit">Сохранить</button>
-</form>
-<p>Совет: для проверки возьми небольшой файл (5–20 МБ), иначе без Celery запрос будет дольше.</p>
-{% endblock %}
-```
-
-**`video/templates/video/detail.html`**
-
-```html
-{% extends "video/base.html" %}
-{% block title %}{{ object.title }}{% endblock %}
-{% block content %}
-<h1>{{ object.title }}</h1>
-{% if object.video.master_url %}
-{% include "hlsfield/players/hls_player.html" with hls_url=object.video.master_url %}
+# templates/lecture_detail.html
+{% if lecture.video.master_url %}
+    {% include "hlsfield/players/hls_player.html" with hls_url=lecture.video.master_url %}
 {% else %}
-<p>Видео ещё обрабатывается… Обновите страницу через минуту.</p>
+    <p>Видео обрабатывается...</p>
 {% endif %}
-{% endblock %}
 ```
 
-**`video/templates/video/list.html`**
+### 3. Полный стек: HLS + DASH
+
+```python
+# models.py
+from hlsfield import AdaptiveVideoField
+
+class Movie(models.Model):
+    title = models.CharField(max_length=200)
+    video = AdaptiveVideoField(
+        upload_to="movies/",
+        hls_playlist_field="hls_playlist",
+        dash_manifest_field="dash_manifest",
+        ladder=[  # настройка качеств
+            {"height": 480, "v_bitrate": 1200, "a_bitrate": 96},
+            {"height": 720, "v_bitrate": 2500, "a_bitrate": 128},
+            {"height": 1080, "v_bitrate": 4500, "a_bitrate": 160},
+        ]
+    )
+    hls_playlist = models.CharField(max_length=500, null=True, blank=True)
+    dash_manifest = models.CharField(max_length=500, null=True, blank=True)
+
+# templates/movie_detail.html
+{% include "hlsfield/players/universal_player.html" with hls_url=movie.video.master_url dash_url=movie.video.dash_url %}
+```
+
+### 4. Интеграция с S3
+
+```python
+# settings.py
+from storages.backends.s3boto3 import S3Boto3Storage
+
+class MediaStorage(S3Boto3Storage):
+    bucket_name = 'my-video-bucket'
+    region_name = 'us-east-1'
+
+DEFAULT_FILE_STORAGE = 'myapp.storage.MediaStorage'
+
+# models.py - без изменений!
+class Video(models.Model):
+    video = HLSVideoField(upload_to="videos/")  # работает с S3 автоматически
+```
+
+### 5. Настройка качества и параметров
+
+```python
+# settings.py
+HLSFIELD_DEFAULT_LADDER = [
+    {"height": 240, "v_bitrate": 300, "a_bitrate": 64},   # мобайл
+    {"height": 480, "v_bitrate": 1200, "a_bitrate": 96},  # SD
+    {"height": 720, "v_bitrate": 2500, "a_bitrate": 128}, # HD
+    {"height": 1080, "v_bitrate": 4500, "a_bitrate": 160}, # Full HD
+    {"height": 1440, "v_bitrate": 8000, "a_bitrate": 192}, # 2K
+]
+
+HLSFIELD_SEGMENT_DURATION = 6  # длина сегментов в секундах
+
+# models.py - кастомное качество для конкретного поля
+class PremiumVideo(models.Model):
+    video = HLSVideoField(
+        ladder=[
+            {"height": 1080, "v_bitrate": 6000, "a_bitrate": 160},
+            {"height": 1440, "v_bitrate": 12000, "a_bitrate": 192},
+            {"height": 2160, "v_bitrate": 20000, "a_bitrate": 256},  # 4K
+        ]
+    )
+```
+
+## 🔧 Настройка Celery (рекомендуется)
+
+Без Celery обработка видео блокирует запрос. С Celery — мгновенная загрузка + фоновая обработка.
+
+```python
+# settings.py
+INSTALLED_APPS = [
+    # ...
+    'hlsfield',
+]
+
+# celery.py
+from celery import Celery
+app = Celery('myproject')
+app.config_from_object('django.conf:settings', namespace='CELERY')
+app.autodiscover_tasks()
+
+# Запуск воркера
+# celery -A myproject worker -l info
+```
+
+## 🎮 Готовые плееры
+
+Библиотека включает готовые HTML-шаблоны плееров:
 
 ```html
-{% extends "video/base.html" %}
-{% block title %}Список{% endblock %}
-{% block content %}
-<h1>Лекции</h1>
-<ul>
-    {% for obj in object_list %}
-    <li><a href="{% url 'video:detail' obj.pk %}">{{ obj.title }}</a></li>
-    {% empty %}
-    <li>Пока пусто. <a href="{% url 'video:upload' %}">Загрузите первое видео</a>.</li>
-    {% endfor %}
-</ul>
-{% endblock %}
+<!-- HLS плеер -->
+{% include "hlsfield/players/hls_player.html" with hls_url=video.master_url %}
+
+<!-- DASH плеер -->
+{% include "hlsfield/players/dash_player.html" with dash_url=video.dash_url %}
+
+<!-- Универсальный (HLS + DASH + прямое MP4) -->
+{% include "hlsfield/players/universal_player.html" with hls_url=... dash_url=... video_url=... %}
+
+<!-- Адаптивный (автовыбор HLS/DASH) -->
+{% include "hlsfield/players/adaptive_player.html" with hls_url=... dash_url=... %}
 ```
 
-### 7) Миграции и запуск
+## 📁 Структура файлов
 
+После обработки видео структура будет выглядеть так:
+
+```
+media/
+└── videos/
+    └── abc12345/
+        ├── my_video.mp4           # оригинал
+        ├── preview.jpg            # превью-кадр
+        ├── meta.json             # метаданные
+        └── hls/                  # HLS артефакты
+            ├── master.m3u8       # главный плейлист
+            ├── v360/             # качество 360p
+            │   ├── index.m3u8
+            │   └── seg_*.ts
+            ├── v720/             # качество 720p
+            │   ├── index.m3u8
+            │   └── seg_*.ts
+            └── v1080/            # качество 1080p
+                ├── index.m3u8
+                └── seg_*.ts
+```
+
+## ⚙️ Конфигурация
+
+| Настройка | По умолчанию | Описание |
+|-----------|--------------|----------|
+| `HLSFIELD_FFMPEG` | `"ffmpeg"` | Путь к ffmpeg |
+| `HLSFIELD_FFPROBE` | `"ffprobe"` | Путь к ffprobe |
+| `HLSFIELD_SEGMENT_DURATION` | `6` | Длина HLS сегментов (сек) |
+| `HLSFIELD_DEFAULT_LADDER` | `[360p, 720p, 1080p]` | Качества по умолчанию |
+| `HLSFIELD_SIDECAR_LAYOUT` | `"nested"` | Структура файлов |
+
+## 🐛 Решение проблем
+
+### FFmpeg не найден
 ```bash
-python manage.py makemigrations
-python manage.py migrate
-python manage.py createsuperuser  # по желанию
-python manage.py runserver
+# Ubuntu/Debian
+sudo apt update && sudo apt install ffmpeg
+
+# macOS
+brew install ffmpeg
+
+# Windows
+# Скачать с https://ffmpeg.org/download.html
 ```
 
-Затем открой:
+### Большие файлы зависают
+```python
+# settings.py - увеличить таймауты
+FILE_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # 100MB
+DATA_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024
+```
 
-* загрузка: `http://127.0.0.1:8000/upload/`
-* список: `http://127.0.0.1:8000/`
+### Проблемы с S3
+```python
+# Проверить права доступа к bucket
+AWS_S3_FILE_OVERWRITE = False
+AWS_DEFAULT_ACL = 'public-read'  # для публичных видео
+```
 
-> **Как это работает:** при сохранении `Lecture` поле `HLSVideoField` создаёт превью и метаданные; HLS-генерация
-> запускается после `post_save` (когда объект уже имеет `pk`). Если Celery не установлен — выполняется синхронно, но уже *
-*после** того, как объект записан в БД.
+## 🤝 Вклад в проект
+
+1. Fork репозитория
+2. Создайте ветку: `git checkout -b feature/amazing-feature`
+3. Commit изменения: `git commit -m 'Add amazing feature'`
+4. Push в ветку: `git push origin feature/amazing-feature`
+5. Откройте Pull Request
+
+## 📄 Лицензия
+
+MIT License. См. [LICENSE](LICENSE) для деталей.
+
+## 🎯 Roadmap
+
+- [ ] Автотесты и CI/CD
+- [ ] WebVTT субтитры и превью-спрайты
+- [ ] GPU-ускорение через NVENC/VAAPI
+- [ ] Поддержка HEVC/AV1 кодеков
+- [ ] Интеграция с CDN (CloudFront, Cloudflare)
+
+---
+
+**Сделано с ❤️ для Django-сообщества**
