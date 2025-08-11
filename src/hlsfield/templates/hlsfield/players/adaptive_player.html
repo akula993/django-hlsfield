@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+
+</body>
+</html>
+{% load static %}
+<div id="adaptive-video-wrap" style="max-width: 960px">
+  <video id="adaptive-video" controls playsinline style="width: 100%;"></video>
+  <div style="margin:8px 0">
+    <label>Качество:</label>
+    <select id="adaptive-quality"></select>
+    <span id="format-info" style="margin-left: 10px; font-size: 0.9em; color: #666;"></span>
+  </div>
+</div>
+
+<!-- Загружаем оба плеера -->
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script src="https://cdn.dashjs.org/latest/dash.all.min.js"></script>
+
+<script>
+(function(){
+  const hlsUrl = "{{ hls_url }}";
+  const dashUrl = "{{ dash_url }}";
+  const video = document.getElementById('adaptive-video');
+  const sel = document.getElementById('adaptive-quality');
+  const formatInfo = document.getElementById('format-info');
+
+  let player = null;
+  let currentFormat = null;
+
+  function supportsHLS() {
+    return Hls.isSupported() || video.canPlayType('application/vnd.apple.mpegurl');
+  }
+
+  function supportsDASH() {
+    return typeof dashjs !== 'undefined' && dashjs.supportsMediaSource();
+  }
+
+  function initializeHLS() {
+    if (Hls.isSupported()) {
+      player = new Hls();
+      player.loadSource(hlsUrl);
+      player.attachMedia(video);
+
+      player.on(Hls.Events.MANIFEST_PARSED, function() {
+        populateQualitySelector(player.levels.map((lvl, i) => ({
+          index: i,
+          height: lvl.height || '?',
+          label: (lvl.height || '?') + 'p'
+        })));
+
+        sel.addEventListener('change', () => {
+          const value = parseInt(sel.value);
+          player.currentLevel = value;
+        });
+      });
+
+      currentFormat = 'HLS';
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Safari native HLS
+      video.src = hlsUrl;
+      currentFormat = 'HLS (Native)';
+    }
+
+    formatInfo.textContent = `Format: ${currentFormat}`;
+  }
+
+  function initializeDASH() {
+    player = dashjs.MediaPlayer().create();
+    player.initialize(video, dashUrl, true);
+
+    player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, function() {
+      const bitrateInfoList = player.getBitrateInfoListFor('video');
+      populateQualitySelector(bitrateInfoList.map(bitrate => ({
+        index: bitrate.qualityIndex,
+        height: bitrate.height,
+        label: bitrate.height + 'p'
+      })));
+
+      sel.addEventListener('change', () => {
+        const value = sel.value;
+        if (value === '-1') {
+          player.setAutoSwitchQualityFor('video', true);
+        } else {
+          player.setAutoSwitchQualityFor('video', false);
+          player.setQualityFor('video', parseInt(value));
+        }
+      });
+    });
+
+    currentFormat = 'DASH';
+    formatInfo.textContent = `Format: ${currentFormat}`;
+  }
+
+  function populateQualitySelector(qualities) {
+    sel.innerHTML = '';
+
+    const auto = document.createElement('option');
+    auto.value = '-1';
+    auto.text = 'Auto';
+    sel.appendChild(auto);
+
+    qualities.forEach(quality => {
+      const o = document.createElement('option');
+      o.value = quality.index;
+      o.text = quality.label;
+      sel.appendChild(o);
+    });
+  }
+
+  // Логика выбора формата: приоритет DASH, фоллбэк на HLS
+  if (dashUrl && supportsDASH()) {
+    initializeDASH();
+  } else if (hlsUrl && supportsHLS()) {
+    initializeHLS();
+  } else {
+    document.getElementById('adaptive-video-wrap').innerHTML =
+      '<p>Your browser does not support adaptive streaming (HLS or DASH).</p>';
+  }
+})();
+</script>

@@ -132,3 +132,92 @@ def pull_to_local(storage, name: str, dst_dir: Path) -> Path:
     with storage.open(name, "rb") as src, dst.open("wb") as out:
         shutil.copyfileobj(src, out)
     return dst
+
+
+def transcode_dash_variants(input_path: Path, out_dir: Path, ladder: List[dict], segment_duration: int = 4):
+    """Создает DASH адаптивный стрим с multiple bitrates"""
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # detect audio
+    info = ffprobe_streams(input_path)
+    _v, a = pick_video_audio_streams(info)
+    has_audio = a is not None
+
+    # Собираем все варианты в одной команде ffmpeg для DASH
+    cmd = [defaults.FFMPEG, "-y", "-i", str(input_path)]
+
+    map_args = []
+    filter_complex_parts = []
+    output_args = []
+
+    # Создаем фильтры для каждого разрешения
+    for i, rung in enumerate(ladder):
+        h = int(rung["height"])
+        vkbps = int(rung["v_bitrate"])
+
+        # Фильтр масштабирования с выравниванием по четным пикселям
+        vf = f"scale=w=-2:h={h}:force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2"
+        filter_complex_parts.append(f"[0:v]{vf}[v{i}]")
+
+        map_args.extend(["-map", f"[v{i}]"])
+        output_args.extend([
+            f"-c:v:{i}", "libx264",
+            f"-preset:v:{i}", "veryfast",
+            f"-profile:v:{i}", "main",
+            f"-b:v:{i}", f"{vkbps}k",
+            f"-maxrate:v:{i}", f"{int(vkbps * 1.07)}k",
+            f"-bufsize:v:{i}", f"{vkbps * 2}k",
+            f"-pix_fmt:v:{i}", "yuv420p"
+        ])
+
+    # Добавляем аудио если есть
+    if has_audio:
+        for i, rung in enumerate(ladder):
+            akbps = int(rung["a_bitrate"])
+            map_args.extend(["-map", "0:a:0"])
+            output_args.extend([
+                f"-c:a:{i}", "aac",
+                f"-b:a:{i}", f"{akbps}k",
+                f"-ac:a:{i}", "2",
+                f"-ar:a:{i}", "48000"
+            ])
+
+    if filter_complex_parts:
+        cmd.extend(["-filter_complex", ";".join(filter_complex_parts)])
+
+    cmd.extend(map_args)
+    cmd.extend(output_args)
+
+    # DASH-специфичные параметры
+    cmd.extend([
+        "-f", "dash",
+        "-seg_duration", str(segment_duration),
+        "-use_template", "1",
+        "-use_timeline", "1",
+        "-init_seg_name", "init-$RepresentationID$.$ext$",
+        "-media_seg_name", "chunk-$RepresentationID$-$Number%05d$.$ext$",
+        str(out_dir / "manifest.mpd")
+    ])
+
+    run(cmd)
+    return out_dir / "manifest.mpd"
+
+
+def transcode_adaptive_variants(input_path: Path, out_dir: Path, ladder: List[dict], segment_duration: int = 6):
+    """Создает и HLS и DASH одновременно, с общими сегментами где возможно"""
+    hls_dir = out_dir / "hls"
+    dash_dir = out_dir / "dash"
+
+    # Сначала создаем HLS
+    hls_master = transcode_hls_variants(input_path, hls_dir, ladder, segment_duration)
+
+    # Затем DASH
+    dash_manifest = transcode_dash_variants(input_path, dash_dir, ladder, segment_duration)
+
+    return {
+        "hls_master": hls_master,
+        "dash_manifest": dash_manifest,
+        "hls_dir": hls_dir,
+        "dash_dir": dash_dir
+    }
+

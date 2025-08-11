@@ -1,0 +1,50 @@
+{% load static %}
+<div id="dash-video-wrap" style="max-width: 960px">
+  <video id="dash-video" controls playsinline style="width: 100%;"></video>
+  <div style="margin:8px 0">
+    <label>Качество:</label>
+    <select id="dash-quality"></select>
+  </div>
+</div>
+<script src="https://cdn.dashjs.org/latest/dash.all.min.js"></script>
+<script>
+(function(){
+  const src = "{{ dash_url }}";
+  const video = document.getElementById('dash-video');
+  const sel = document.getElementById('dash-quality');
+
+  if (typeof dashjs !== 'undefined') {
+    const player = dashjs.MediaPlayer().create();
+    player.initialize(video, src, true);
+
+    // Настройка событий для выбора качества
+    player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, function() {
+      const bitrateInfoList = player.getBitrateInfoListFor('video');
+      sel.innerHTML = '';
+
+      const auto = document.createElement('option');
+      auto.value = 'auto';
+      auto.text = 'Auto';
+      sel.appendChild(auto);
+
+      bitrateInfoList.forEach((bitrate, i) => {
+        const o = document.createElement('option');
+        o.value = bitrate.qualityIndex;
+        o.text = bitrate.height + 'p';
+        sel.appendChild(o);
+      });
+
+      sel.addEventListener('change', () => {
+        if (sel.value === 'auto') {
+          player.setAutoSwitchQualityFor('video', true);
+        } else {
+          player.setAutoSwitchQualityFor('video', false);
+          player.setQualityFor('video', parseInt(sel.value));
+        }
+      });
+    });
+  } else {
+    document.getElementById('dash-video-wrap').innerHTML = '<p>DASH player not available.</p>';
+  }
+})();
+</script>

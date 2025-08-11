@@ -252,3 +252,143 @@ class HLSVideoField(VideoField):
         except Exception:
             from .tasks import build_hls_for_field_sync
             build_hls_for_field_sync(instance._meta.label, instance.pk, self.attname)
+
+
+class DASHVideoFieldFile(VideoFieldFile):
+    def dash_url(self) -> Optional[str]:
+        field: DASHVideoField = self.field  # type: ignore
+        inst = self.instance
+        playlist_field = getattr(field, "dash_manifest_field", None)
+        if playlist_field:
+            name = getattr(inst, playlist_field, None)
+            if name:
+                try:
+                    return self.storage.url(name)
+                except Exception:
+                    return None
+        return None
+
+    def save(self, name: str, content: File, save: bool = True):
+        super().save(name, content, save)
+        field: DASHVideoField = self.field  # type: ignore
+        inst = self.instance
+        if not getattr(field, "dash_on_save", True):
+            return
+        # если pk ещё нет — отложим до post_save
+        if getattr(inst, "pk", None) is None:
+            setattr(inst, f"__dash_pending__{field.attname}", True)
+            return
+        field._trigger_dash(inst)
+
+
+class DASHVideoField(VideoField):
+    """DASH (Dynamic Adaptive Streaming over HTTP) поле для адаптивного видео.
+
+    Создает:
+    - Несколько представлений разного качества
+    - MPD манифест для DASH-плеера
+    - Сегменты в формате MP4
+
+    Пример использования:
+        video = DASHVideoField(
+            upload_to="videos/",
+            dash_manifest_field="dash_manifest",
+            ladder=[
+                {"height": 360, "v_bitrate": 800, "a_bitrate": 96},
+                {"height": 720, "v_bitrate": 2500, "a_bitrate": 128},
+            ]
+        )
+        dash_manifest = models.CharField(max_length=500, null=True, blank=True)
+    """
+    attr_class = DASHVideoFieldFile
+
+    def __init__(self, *args,
+                 dash_manifest_field: str | None = None,
+                 dash_base_subdir: str | None = None,
+                 ladder: list[dict] | None = None,
+                 segment_duration: int | None = None,
+                 dash_on_save: bool = True,
+                 **kwargs: Any,
+                 ):
+        super().__init__(*args, **kwargs)
+        self.dash_manifest_field = dash_manifest_field
+        self.dash_base_subdir = dash_base_subdir or "dash"
+        self.ladder = ladder or defaults.DEFAULT_LADDER
+        self.segment_duration = segment_duration or defaults.SEGMENT_DURATION
+        self.dash_on_save = dash_on_save
+
+    def contribute_to_class(self, cls, name, **kwargs):
+        super().contribute_to_class(cls, name, **kwargs)
+        self.attname = name
+        from django.db.models.signals import post_save
+        def _handler(sender, instance, created, **kw):
+            if getattr(instance, f"__dash_pending__{name}", False):
+                setattr(instance, f"__dash_pending__{name}", False)
+                try:
+                    self._trigger_dash(instance)
+                except Exception:
+                    pass
+
+        post_save.connect(_handler, sender=cls, weak=False)
+
+    def _trigger_dash(self, instance):
+        try:
+            from .tasks import build_dash_for_field, build_dash_for_field_sync
+            if hasattr(build_dash_for_field, "delay"):
+                build_dash_for_field.delay(instance._meta.label, instance.pk, self.attname)
+            else:
+                build_dash_for_field_sync(instance._meta.label, instance.pk, self.attname)
+        except Exception:
+            from .tasks import build_dash_for_field_sync
+            build_dash_for_field_sync(instance._meta.label, instance.pk, self.attname)
+
+
+# Комбинированное поле для HLS + DASH
+class AdaptiveVideoField(VideoField):
+    """Поле, которое генерирует одновременно HLS и DASH из одного видео.
+
+    Удобно для максимальной совместимости: HLS для Safari/iOS, DASH для остальных.
+    """
+    attr_class = VideoFieldFile  # используем базовый, логику вынесем в задачи
+
+    def __init__(self, *args,
+                 hls_playlist_field: str | None = None,
+                 dash_manifest_field: str | None = None,
+                 adaptive_base_subdir: str | None = None,
+                 ladder: list[dict] | None = None,
+                 segment_duration: int | None = None,
+                 adaptive_on_save: bool = True,
+                 **kwargs: Any,
+                 ):
+        super().__init__(*args, **kwargs)
+        self.hls_playlist_field = hls_playlist_field
+        self.dash_manifest_field = dash_manifest_field
+        self.adaptive_base_subdir = adaptive_base_subdir or "adaptive"
+        self.ladder = ladder or defaults.DEFAULT_LADDER
+        self.segment_duration = segment_duration or defaults.SEGMENT_DURATION
+        self.adaptive_on_save = adaptive_on_save
+
+    def contribute_to_class(self, cls, name, **kwargs):
+        super().contribute_to_class(cls, name, **kwargs)
+        self.attname = name
+        from django.db.models.signals import post_save
+        def _handler(sender, instance, created, **kw):
+            if getattr(instance, f"__adaptive_pending__{name}", False):
+                setattr(instance, f"__adaptive_pending__{name}", False)
+                try:
+                    self._trigger_adaptive(instance)
+                except Exception:
+                    pass
+
+        post_save.connect(_handler, sender=cls, weak=False)
+
+    def _trigger_adaptive(self, instance):
+        try:
+            from .tasks import build_adaptive_for_field, build_adaptive_for_field_sync
+            if hasattr(build_adaptive_for_field, "delay"):
+                build_adaptive_for_field.delay(instance._meta.label, instance.pk, self.attname)
+            else:
+                build_adaptive_for_field_sync(instance._meta.label, instance.pk, self.attname)
+        except Exception:
+            from .tasks import build_adaptive_for_field_sync
+            build_adaptive_for_field_sync(instance._meta.label, instance.pk, self.attname)

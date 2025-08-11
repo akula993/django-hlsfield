@@ -1,0 +1,219 @@
+{% load static %}
+<div id="universal-video-wrap" style="max-width: 960px">
+  <video id="universal-video" controls playsinline style="width: 100%; max-height: 70vh;"></video>
+  <div style="margin:8px 0; display: flex; gap: 15px; align-items: center;">
+    <div>
+      <label>Качество:</label>
+      <select id="universal-quality"></select>
+    </div>
+    <div>
+      <label>Формат:</label>
+      <select id="format-selector">
+        {% if dash_url %}<option value="dash">DASH</option>{% endif %}
+        {% if hls_url %}<option value="hls">HLS</option>{% endif %}
+        {% if video_url %}<option value="direct">MP4 (прямой)</option>{% endif %}
+      </select>
+    </div>
+    <div id="format-status" style="font-size: 0.9em; color: #666;"></div>
+  </div>
+  <div style="margin-top: 8px;">
+    <details style="font-size: 0.9em;">
+      <summary>Информация о видео</summary>
+      <div id="video-info" style="margin-top: 8px; padding: 8px; background: #f5f5f5; border-radius: 4px;">
+        <div>Разрешение: <span id="resolution">-</span></div>
+        <div>Битрейт: <span id="bitrate">-</span></div>
+        <div>Буферизация: <span id="buffer">-</span></div>
+      </div>
+    </details>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script src="https://cdn.dashjs.org/latest/dash.all.min.js"></script>
+
+<script>
+(function(){
+  const hlsUrl = "{{ hls_url }}";
+  const dashUrl = "{{ dash_url }}";
+  const videoUrl = "{{ video_url }}"; // прямая ссылка на MP4 если есть
+
+  const video = document.getElementById('universal-video');
+  const qualitySelect = document.getElementById('universal-quality');
+  const formatSelect = document.getElementById('format-selector');
+  const formatStatus = document.getElementById('format-status');
+
+  const resolutionSpan = document.getElementById('resolution');
+  const bitrateSpan = document.getElementById('bitrate');
+  const bufferSpan = document.getElementById('buffer');
+
+  let currentPlayer = null;
+  let currentFormat = null;
+
+  function cleanup() {
+    if (currentPlayer) {
+      if (typeof currentPlayer.destroy === 'function') {
+        currentPlayer.destroy();
+      }
+      currentPlayer = null;
+    }
+    video.src = '';
+    qualitySelect.innerHTML = '';
+  }
+
+  function updateVideoInfo() {
+    if (video.videoWidth && video.videoHeight) {
+      resolutionSpan.textContent = `${video.videoWidth}x${video.videoHeight}`;
+    }
+
+    // Примерная оценка буфера
+    if (video.buffered.length > 0) {
+      const buffered = video.buffered.end(video.buffered.length - 1) - video.currentTime;
+      bufferSpan.textContent = `${buffered.toFixed(1)}s`;
+    }
+  }
+
+  function initHLS() {
+    cleanup();
+    currentFormat = 'HLS';
+
+    if (Hls.isSupported()) {
+      currentPlayer = new Hls();
+      currentPlayer.loadSource(hlsUrl);
+      currentPlayer.attachMedia(video);
+
+      currentPlayer.on(Hls.Events.MANIFEST_PARSED, function() {
+        qualitySelect.innerHTML = '';
+
+        const auto = document.createElement('option');
+        auto.value = '-1';
+        auto.text = 'Auto';
+        qualitySelect.appendChild(auto);
+
+        currentPlayer.levels.forEach((lvl, i) => {
+          const o = document.createElement('option');
+          o.value = i;
+          o.text = `${lvl.height || '?'}p (${Math.round(lvl.bitrate/1000)}k)`;
+          qualitySelect.appendChild(o);
+        });
+      });
+
+      currentPlayer.on(Hls.Events.LEVEL_SWITCHED, function(event, data) {
+        const level = currentPlayer.levels[data.level];
+        bitrateSpan.textContent = `${Math.round(level.bitrate/1000)}k`;
+      });
+
+      formatStatus.textContent = 'HLS.js';
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = hlsUrl;
+      formatStatus.textContent = 'HLS (Native)';
+    } else {
+      formatStatus.textContent = 'HLS not supported';
+    }
+  }
+
+  function initDASH() {
+    cleanup();
+    currentFormat = 'DASH';
+
+    if (typeof dashjs !== 'undefined') {
+      currentPlayer = dashjs.MediaPlayer().create();
+      currentPlayer.initialize(video, dashUrl, true);
+
+      currentPlayer.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, function() {
+        const bitrateInfoList = currentPlayer.getBitrateInfoListFor('video');
+
+        qualitySelect.innerHTML = '';
+        const auto = document.createElement('option');
+        auto.value = '-1';
+        auto.text = 'Auto';
+        qualitySelect.appendChild(auto);
+
+        bitrateInfoList.forEach(bitrate => {
+          const o = document.createElement('option');
+          o.value = bitrate.qualityIndex;
+          o.text = `${bitrate.height}p (${Math.round(bitrate.bitrate/1000)}k)`;
+          qualitySelect.appendChild(o);
+        });
+      });
+
+      currentPlayer.on(dashjs.MediaPlayer.events.QUALITY_CHANGE_RENDERED, function(e) {
+        if (e.mediaType === 'video') {
+          const bitrate = currentPlayer.getBitrateInfoListFor('video')[e.newQuality];
+          if (bitrate) {
+            bitrateSpan.textContent = `${Math.round(bitrate.bitrate/1000)}k`;
+          }
+        }
+      });
+
+      formatStatus.textContent = 'DASH.js';
+    } else {
+      formatStatus.textContent = 'DASH not supported';
+    }
+  }
+
+  function initDirect() {
+    cleanup();
+    currentFormat = 'Direct';
+    video.src = videoUrl;
+    formatStatus.textContent = 'Direct MP4';
+
+    // Для прямого MP4 нет выбора качества
+    qualitySelect.innerHTML = '<option value="0">Original</option>';
+  }
+
+  // Event listeners
+  qualitySelect.addEventListener('change', () => {
+    const value = parseInt(qualitySelect.value);
+
+    if (currentFormat === 'HLS' && currentPlayer && currentPlayer.levels) {
+      currentPlayer.currentLevel = value;
+    } else if (currentFormat === 'DASH' && currentPlayer) {
+      if (value === -1) {
+        currentPlayer.setAutoSwitchQualityFor('video', true);
+      } else {
+        currentPlayer.setAutoSwitchQualityFor('video', false);
+        currentPlayer.setQualityFor('video', value);
+      }
+    }
+  });
+
+  formatSelect.addEventListener('change', () => {
+    const format = formatSelect.value;
+
+    switch(format) {
+      case 'hls':
+        if (hlsUrl) initHLS();
+        break;
+      case 'dash':
+        if (dashUrl) initDASH();
+        break;
+      case 'direct':
+        if (videoUrl) initDirect();
+        break;
+    }
+  });
+
+  // Обновление информации о видео
+  video.addEventListener('loadedmetadata', updateVideoInfo);
+  video.addEventListener('timeupdate', updateVideoInfo);
+  video.addEventListener('progress', updateVideoInfo);
+
+  // Автоматический выбор лучшего формата при загрузке
+  function autoSelectFormat() {
+    if (dashUrl && typeof dashjs !== 'undefined') {
+      formatSelect.value = 'dash';
+      initDASH();
+    } else if (hlsUrl && (Hls.isSupported() || video.canPlayType('application/vnd.apple.mpegurl'))) {
+      formatSelect.value = 'hls';
+      initHLS();
+    } else if (videoUrl) {
+      formatSelect.value = 'direct';
+      initDirect();
+    } else {
+      formatStatus.textContent = 'No compatible format available';
+    }
+  }
+
+  autoSelectFormat();
+})();
+</script>

@@ -36,6 +36,16 @@ HLS_SUBDIR       = _get("HLSFIELD_HLS_SUBDIR", "hls")
 USE_DEFAULT_UPLOAD_TO = bool(_get("HLSFIELD_USE_DEFAULT_UPLOAD_TO", True))
 DEFAULT_UPLOAD_TO_PATH = _get("HLSFIELD_DEFAULT_UPLOAD_TO", None)
 
+
+
+DASH_SUBDIR = _get("HLSFIELD_DASH_SUBDIR", "dash")
+ADAPTIVE_SUBDIR = _get("HLSFIELD_ADAPTIVE_SUBDIR", "adaptive")
+
+# Конфигурация для DASH
+DASH_SEGMENT_DURATION = int(_get("HLSFIELD_DASH_SEGMENT_DURATION", 4))  # DASH обычно использует более короткие сегменты
+DASH_USE_TEMPLATE = bool(_get("HLSFIELD_DASH_USE_TEMPLATE", True))
+DASH_USE_TIMELINE = bool(_get("HLSFIELD_DASH_USE_TIMELINE", True))
+
 # Фоллбэк-реализация upload_to (если dotted-path не задан)
 import os, uuid
 def default_upload_to(instance, filename: str) -> str:
