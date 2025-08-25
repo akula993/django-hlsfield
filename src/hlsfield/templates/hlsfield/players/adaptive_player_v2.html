@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Quality Monitor для HLS/DASH</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 1200px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+            text-align: center;
+            font-size: 2rem;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto 30px;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .overlay-stats {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-family: monospace;
+            min-width: 200px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .stat-unit {
+            font-size: 0.8rem;
+            color: #999;
+            margin-left: 5px;
+        }
+
+        .quality-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 5px;
+            animation: pulse 2s infinite;
+        }
+
+        .quality-good {
+            background: #4CAF50;
+        }
+
+        .quality-medium {
+            background: #FFC107;
+        }
+
+        .quality-poor {
+            background: #F44336;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .chart-container {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        canvas {
+            max-width: 100%;
+            height: 200px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: opacity 0.3s;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .network-timeline {
+            position: relative;
+            height: 100px;
+            background: #f5f5f5;
+            border-radius: 10px;
+            padding: 10px;
+            overflow: hidden;
+        }
+
+        .timeline-bar {
+            position: absolute;
+            bottom: 0;
+            width: 2px;
+            background: #667eea;
+            transition: height 0.3s ease;
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .alert.show {
+            display: block;
+            animation: slideIn 0.3s ease;
+        }
+
+        .alert-warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
+        .alert-danger {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateY(-20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 Adaptive Video Streaming Monitor</h1>
+
+        <div id="alert" class="alert"></div>
+
+        <div class="video-container">
+            <video id="videoPlayer" controls></video>
+            <div class="overlay-stats">
+                <div>Quality: <span id="currentQuality">-</span></div>
+                <div>Buffer: <span id="bufferLevel">-</span>s</div>
+                <div>Bitrate: <span id="currentBitrate">-</span></div>
+                <div>Dropped: <span id="droppedFrames">0</span></div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button onclick="networkMonitor.simulateGoodNetwork()">📶 Good Network</button>
+            <button onclick="networkMonitor.simulateMediumNetwork()">📶 Medium Network</button>
+            <button onclick="networkMonitor.simulatePoorNetwork()">📶 Poor Network</button>
+            <button onclick="networkMonitor.toggleMonitoring()" id="monitorBtn">Start Monitoring</button>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Network Speed</div>
+                <div class="stat-value">
+                    <span class="quality-indicator" id="speedIndicator"></span>
+                    <span id="networkSpeed">-</span>
+                    <span class="stat-unit">Mbps</span>
+                </div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-label">Latency</div>
+                <div class="stat-value">
+                    <span id="latency">-</span>
+                    <span class="stat-unit">ms</span>
+                </div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-label">Packet Loss</div>
+                <div class="stat-value">
+                    <span id="packetLoss">0</span>
+                    <span class="stat-unit">%</span>
+                </div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-label">Connection Type</div>
+                <div class="stat-value" style="font-size: 1.2rem;">
+                    <span id="connectionType">-</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <h3>Network Performance Timeline</h3>
+            <canvas id="networkChart"></canvas>
+        </div>
+
+        <div class="chart-container">
+            <h3>Quality Switches History</h3>
+            <div class="network-timeline" id="qualityTimeline"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+
+    <script>
+    class NetworkQualityMonitor {
+        constructor() {
+            this.monitoring = false;
+            this.metrics = {
+                bandwidth: 0,
+                latency: 0,
+                packetLoss: 0,
+                connectionType: 'unknown',
+                bufferLevel: 0,
+                currentQuality: null,
+                qualityHistory: [],
+                bandwidthHistory: []
+            };
+
+            this.video = document.getElementById('videoPlayer');
+            this.chart = null;
+            this.hlsPlayer = null;
+
+            this.initializeChart();
+            this.initializeNetworkAPI();
+            this.initializeVideoPlayer();
+        }
+
+        initializeChart() {
+            const ctx = document.getElementById('networkChart').getContext('2d');
+            this.chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Bandwidth (Mbps)',
+                        data: [],
+                        borderColor: '#667eea',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        tension: 0.4
+                    }, {
+                        label: 'Buffer (s)',
+                        data: [],
+                        borderColor: '#4CAF50',
+                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                        tension: 0.4,
+                        yAxisID: 'y1'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            position: 'left'
+                        },
+                        y1: {
+                            beginAtZero: true,
+                            position: 'right',
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    }
+                }
+            });
+        }
+
+        initializeNetworkAPI() {
+            if ('connection' in navigator) {
+                const connection = navigator.connection;
+
+                // Начальные данные
+                this.updateConnectionInfo(connection);
+
+                // Слушаем изменения
+                connection.addEventListener('change', () => {
+                    this.updateConnectionInfo(connection);
+                });
+            }
+
+            // Тестируем реальную скорость периодически
+            this.startSpeedTest();
+        }
+
+        initializeVideoPlayer() {
+            // Здесь должен быть URL вашего HLS стрима
+            const videoSrc = '/media/videos/sample/hls/master.m3u8';
+
+            if (Hls.isSupported()) {
+                this.hlsPlayer = new Hls({
+                    debug: false,
+                    enableWorker: true,
+                    startLevel: -1, // Auto
+                    capLevelToPlayerSize: true,
+                    maxBufferLength: 30,
+                    maxMaxBufferLength: 60
+                });
+
+                this.hlsPlayer.loadSource(videoSrc);
+                this.hlsPlayer.attachMedia(this.video);
+
+                // События HLS
+                this.hlsPlayer.on(Hls.Events.LEVEL_SWITCHING, (event, data) => {
+                    this.onQualityChange(data.level);
+                });
+
+                this.hlsPlayer.on(Hls.Events.FRAG_LOADED, (event, data) => {
+                    this.onFragmentLoaded(data);
+                });
+
+                this.hlsPlayer.on(Hls.Events.ERROR, (event, data) => {
+                    this.onPlayerError(data);
+                });
+            } else if (this.video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Safari native HLS
+                this.video.src = videoSrc;
+            }
+
+            // События видео
+            this.video.addEventListener('progress', () => this.updateBufferLevel());
+            this.video.addEventListener('waiting', () => this.onBuffering());
+            this.video.addEventListener('playing', () => this.onPlaying());
+        }
+
+        updateConnectionInfo(connection) {
+            this.metrics.connectionType = connection.effectiveType || 'unknown';
+            this.metrics.bandwidth = connection.downlink || 0;
+
+            document.getElementById('connectionType').textContent = this.metrics.connectionType.toUpperCase();
+            this.updateNetworkSpeed(this.metrics.bandwidth);
+        }
+
+        updateNetworkSpeed(speed) {
+            this.metrics.bandwidth = speed;
+            document.getElementById('networkSpeed').textContent = speed.toFixed(2);
+
+            // Обновляем индикатор качества
+            const indicator = document.getElementById('speedIndicator');
+            indicator.className = 'quality-indicator';
+
+            if (speed > 5) {
+                indicator.classList.add('quality-good');
+            } else if (speed > 2) {
+                indicator.classList.add('quality-medium');
+            } else {
+                indicator.classList.add('quality-poor');
+            }
+        }
+
+        async startSpeedTest() {
+            if (!this.monitoring) return;
+
+            try {
+                // Тестовый запрос для измерения скорости
+                const testSize = 1024 * 100; // 100KB
+                const startTime = performance.now();
+
+                // Используем fetch для загрузки тестового файла
+                const response = await fetch('/api/speed-test', {
+                    method: 'POST',
+                    body: new ArrayBuffer(testSize)
+                });
+
+                const endTime = performance.now();
+                const duration = (endTime - startTime) / 1000; // в секундах
+                const speedMbps = (testSize * 8) / (duration * 1024 * 1024);
+
+                this.updateNetworkSpeed(speedMbps);
+
+                // Измеряем latency
+                this.metrics.latency = duration * 1000;
+                document.getElementById('latency').textContent = Math.round(this.metrics.latency);
+
+            } catch (error) {
+                console.error('Speed test failed:', error);
+            }
+
+            // Повторяем тест каждые 5 секунд
+            if (this.monitoring) {
+                setTimeout(() => this.startSpeedTest(), 5000);
+            }
+        }
+
+        updateBufferLevel() {
+            if (!this.video.buffered.length) return;
+
+            const buffered = this.video.buffered.end(this.video.buffered.length - 1);
+            const currentTime = this.video.currentTime;
+            this.metrics.bufferLevel = buffered - currentTime;
+
+            document.getElementById('bufferLevel').textContent = this.metrics.bufferLevel.toFixed(1);
+        }
+
+        onQualityChange(level) {
+            if (!this.hlsPlayer) return;
+
+            const quality = this.hlsPlayer.levels[level];
+            if (quality) {
+                this.metrics.currentQuality = level;
+                document.getElementById('currentQuality').textContent = `${quality.height}p`;
+                document.getElementById('currentBitrate').textContent =
+                    `${Math.round(quality.bitrate / 1000)}k`;
+
+                // Добавляем в историю
+                this.metrics.qualityHistory.push({
+                    time: Date.now(),
+                    level: level,
+                    height: quality.height,
+                    bitrate: quality.bitrate
+                });
+
+                this.updateQualityTimeline();
+            }
+        }
+
+        onFragmentLoaded(data) {
+            // Рассчитываем реальную скорость загрузки
+            const loadTime = data.stats.tload - data.stats.trequest;
+            const bytes = data.stats.total;
+            const speedBps = (bytes * 8) / (loadTime / 1000);
+            const speedMbps = speedBps / (1024 * 1024);
+
+            // Обновляем среднюю скорость
+            this.metrics.bandwidth = (this.metrics.bandwidth * 0.7 + speedMbps * 0.3);
+            this.updateNetworkSpeed(this.metrics.bandwidth);
+        }
+
+        onPlayerError(data) {
+            console.error('HLS Error:', data);
+
+            if (data.fatal) {
+                this.showAlert('Critical streaming error occurred', 'danger');
+
+                // Пытаемся восстановить
+                switch(data.type) {
+                    case Hls.ErrorTypes.NETWORK_ERROR:
+                        this.hlsPlayer.startLoad();
+                        break;
+                    case Hls.ErrorTypes.MEDIA_ERROR:
+                        this.hlsPlayer.recoverMediaError();
+                        break;
+                }
+            }
+        }
+
+        onBuffering() {
+            this.showAlert('Buffering... Network may be slow', 'warning');
+        }
+
+        onPlaying() {
+            this.hideAlert();
+        }
+
+        updateQualityTimeline() {
+            const timeline = document.getElementById('qualityTimeline');
+            timeline.innerHTML = '';
+
+            const maxHeight = 90;
+            const barWidth = 100 / Math.max(this.metrics.qualityHistory.length, 1);
+
+            this.metrics.qualityHistory.slice(-50).forEach((item, index) => {
+                const bar = document.createElement('div');
+                bar.className = 'timeline-bar';
+                bar.style.left = `${index * barWidth}%`;
+                bar.style.width = `${barWidth}%`;
+                bar.style.height = `${(item.height / 1080) * maxHeight}px`;
+                bar.style.background = this.getQualityColor(item.height);
+                bar.title = `${item.height}p @ ${new Date(item.time).toLocaleTimeString()}`;
+                timeline.appendChild(bar);
+            });
+        }
+
+        getQualityColor(height) {
+            if (height >= 1080) return '#4CAF50';
+            if (height >= 720) return '#2196F3';
+            if (height >= 480) return '#FFC107';
+            return '#FF9800';
+        }
+
+        updateChart() {
+            if (!this.chart) return;
+
+            const now = new Date().toLocaleTimeString();
+
+            // Добавляем новые данные
+            this.chart.data.labels.push(now);
+            this.chart.data.datasets[0].data.push(this.metrics.bandwidth);
+            this.chart.data.datasets[1].data.push(this.metrics.bufferLevel);
+
+            // Ограничиваем количество точек
+            const maxPoints = 20;
+            if (this.chart.data.labels.length > maxPoints) {
+                this.chart.data.labels.shift();
+                this.chart.data.datasets.forEach(dataset => dataset.data.shift());
+            }
+
+            this.chart.update('none'); // без анимации для производительности
+        }
+
+        toggleMonitoring() {
+            this.monitoring = !this.monitoring;
+            const btn = document.getElementById('monitorBtn');
+
+            if (this.monitoring) {
+                btn.textContent = 'Stop Monitoring';
+                this.startMonitoring();
+            } else {
+                btn.textContent = 'Start Monitoring';
+                this.stopMonitoring();
+            }
+        }
+
+        startMonitoring() {
+            this.startSpeedTest();
+
+            // Обновляем UI каждую секунду
+            this.monitoringInterval = setInterval(() => {
+                this.updateBufferLevel();
+                this.updateChart();
+                this.checkNetworkQuality();
+            }, 1000);
+
+            // Проверяем dropped frames
+            this.framesInterval = setInterval(() => {
+                if (this.video.getVideoPlaybackQuality) {
+                    const quality = this.video.getVideoPlaybackQuality();
+                    document.getElementById('droppedFrames').textContent = quality.droppedVideoFrames;
+                }
+            }, 2000);
+        }
+
+        stopMonitoring() {
+            clearInterval(this.monitoringInterval);
+            clearInterval(this.framesInterval);
+        }
+
+        checkNetworkQuality() {
+            // Проверяем критические условия
+            if (this.metrics.bufferLevel < 2) {
+                this.showAlert('Low buffer! Quality may be reduced', 'warning');
+            }
+
+            if (this.metrics.bandwidth < 1) {
+                this.showAlert('Very slow network detected', 'danger');
+            }
+
+            // Симулируем packet loss на основе скорости
+            if (this.metrics.bandwidth < 2) {
+                this.metrics.packetLoss = Math.random() * 5;
+                document.getElementById('packetLoss').textContent = this.metrics.packetLoss.toFixed(1);
+            } else {
+                this.metrics.packetLoss = 0;
+                document.getElementById('packetLoss').textContent = '0';
+            }
+        }
+
+        showAlert(message, type = 'warning') {
+            const alert = document.getElementById('alert');
+            alert.textContent = message;
+            alert.className = `alert alert-${type} show`;
+        }
+
+        hideAlert() {
+            const alert = document.getElementById('alert');
+            alert.className = 'alert';
+        }
+
+        // Методы для симуляции различных условий сети
+        simulateGoodNetwork() {
+            this.simulateNetworkConditions(10, 20, 0);
+        }
+
+        simulateMediumNetwork() {
+            this.simulateNetworkConditions(3, 50, 0.5);
+        }
+
+        simulatePoorNetwork() {
+            this.simulateNetworkConditions(0.5, 200, 5);
+        }
+
+        simulateNetworkConditions(bandwidth, latency, packetLoss) {
+            this.metrics.bandwidth = bandwidth;
+            this.metrics.latency = latency;
+            this.metrics.packetLoss = packetLoss;
+
+            this.updateNetworkSpeed(bandwidth);
+            document.getElementById('latency').textContent = latency;
+            document.getElementById('packetLoss').textContent = packetLoss.toFixed(1);
+
+            // Применяем к HLS плееру если доступен
+            if (this.hlsPlayer) {
+                // Эмулируем изменение качества на основе bandwidth
+                if (bandwidth < 1) {
+                    this.hlsPlayer.currentLevel = 0; // Минимальное качество
+                } else if (bandwidth < 3) {
+                    this.hlsPlayer.currentLevel = Math.min(1, this.hlsPlayer.levels.length - 1);
+                } else if (bandwidth > 5) {
+                    this.hlsPlayer.currentLevel = -1; // Auto
+                }
+            }
+
+            this.showAlert(`Network simulation: ${bandwidth > 5 ? 'Good' : bandwidth > 2 ? 'Medium' : 'Poor'}`, 'info');
+        }
+    }
+
+    // Инициализация
+    const networkMonitor = new NetworkQualityMonitor();
+
+    // Автостарт мониторинга
+    setTimeout(() => {
+        networkMonitor.toggleMonitoring();
+    }, 1000);
+    </script>
+</body>
+</html>
