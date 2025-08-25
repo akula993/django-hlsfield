@@ -1,0 +1,611 @@
+{% load static %}
+<div id="smart-video-container" class="smart-video-player" style="position: relative; max-width: 960px; margin: 0 auto;">
+  <!-- Основной видеоплеер -->
+  <video id="smart-video" controls playsinline
+         style="width: 100%; background: #000;"
+         poster="{{ poster_url }}">
+    <source src="{{ video_url }}" type="video/mp4">
+    Ваш браузер не поддерживает видео.
+  </video>
+
+  <!-- Оверлей загрузки -->
+  <div id="loading-overlay" style="
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 18px;
+    z-index: 10;
+  ">
+    <div class="loading-content">
+      <div class="spinner" style="
+        border: 3px solid #f3f3f3;
+        border-top: 3px solid #3498db;
+        border-radius: 50%;
+        width: 30px; height: 30px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 15px;
+      "></div>
+      <div id="loading-text">Подготовка видео...</div>
+      <div id="loading-progress" style="margin-top: 10px; font-size: 14px; opacity: 0.8;"></div>
+    </div>
+  </div>
+
+  <!-- Панель управления качеством -->
+  <div id="quality-controls" style="
+    position: absolute;
+    top: 10px; right: 10px;
+    background: rgba(0,0,0,0.7);
+    border-radius: 5px;
+    padding: 8px;
+    color: white;
+    font-size: 12px;
+    z-index: 5;
+  ">
+    <div style="margin-bottom: 5px;">
+      <label>Качество:</label>
+      <select id="quality-selector" style="margin-left: 5px; background: rgba(255,255,255,0.9);">
+        <option value="auto">Авто</option>
+      </select>
+    </div>
+    <div>
+      <label>Формат:</label>
+      <select id="format-selector" style="margin-left: 5px; background: rgba(255,255,255,0.9);">
+        {% if dash_url %}<option value="dash">DASH</option>{% endif %}
+        {% if hls_url %}<option value="hls">HLS</option>{% endif %}
+        {% if video_url %}<option value="mp4">MP4</option>{% endif %}
+      </select>
+    </div>
+  </div>
+
+  <!-- Информационная панель -->
+  <div id="video-stats" style="
+    position: absolute;
+    bottom: 60px; left: 10px;
+    background: rgba(0,0,0,0.7);
+    border-radius: 5px;
+    padding: 8px;
+    color: white;
+    font-size: 11px;
+    z-index: 5;
+    min-width: 200px;
+    display: none;
+  ">
+    <div><strong>Статистика:</strong></div>
+    <div>Разрешение: <span id="stat-resolution">-</span></div>
+    <div>Битрейт: <span id="stat-bitrate">-</span></div>
+    <div>Буфер: <span id="stat-buffer">-</span></div>
+    <div>Потеряно кадров: <span id="stat-dropped">0</span></div>
+    <div>Сеть: <span id="stat-network">-</span></div>
+  </div>
+
+  <!-- Кнопка статистики -->
+  <button id="stats-toggle" style="
+    position: absolute;
+    bottom: 10px; left: 10px;
+    background: rgba(0,0,0,0.7);
+    border: none;
+    color: white;
+    padding: 5px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    cursor: pointer;
+    z-index: 5;
+  ">📊 Статистика</button>
+
+  <!-- Уведомления -->
+  <div id="notifications" style="
+    position: absolute;
+    top: 50px; right: 10px;
+    z-index: 15;
+    max-width: 300px;
+  "></div>
+</div>
+
+<style>
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.notification {
+  background: rgba(52, 152, 219, 0.9);
+  color: white;
+  padding: 10px;
+  border-radius: 5px;
+  margin-bottom: 5px;
+  animation: slideIn 0.3s ease;
+}
+
+.notification.error {
+  background: rgba(231, 76, 60, 0.9);
+}
+
+.notification.success {
+  background: rgba(46, 204, 113, 0.9);
+}
+
+@keyframes slideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.smart-video-player:fullscreen #quality-controls,
+.smart-video-player:fullscreen #stats-toggle {
+  z-index: 2147483647;
+}
+</style>
+
+<!-- Подключаем библиотеки -->
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script src="https://cdn.dashjs.org/latest/dash.all.min.js"></script>
+
+<script>
+class SmartVideoPlayer {
+  constructor(options) {
+    this.options = {
+      hlsUrl: "{{ hls_url }}",
+      dashUrl: "{{ dash_url }}",
+      videoUrl: "{{ video_url }}",
+      pollInterval: "{{ poll_interval|default:5000 }}",
+      analyticsEndpoint: "{{ analytics_endpoint }}",
+      ...options
+    };
+
+    this.video = document.getElementById('smart-video');
+    this.player = null;
+    this.currentFormat = null;
+    this.stats = {};
+    this.analytics = {
+      startTime: Date.now(),
+      totalWatchTime: 0,
+      qualityChanges: 0,
+      bufferEvents: 0,
+      errors: []
+    };
+
+    this.init();
+  }
+
+  init() {
+    this.setupEventListeners();
+    this.startPollingForContent();
+    this.detectOptimalFormat();
+  }
+
+  setupEventListeners() {
+    // Управление качеством
+    document.getElementById('quality-selector').addEventListener('change', (e) => {
+      this.changeQuality(e.target.value);
+    });
+
+    document.getElementById('format-selector').addEventListener('change', (e) => {
+      this.changeFormat(e.target.value);
+    });
+
+    // Показать/скрыть статистику
+    document.getElementById('stats-toggle').addEventListener('click', () => {
+      this.toggleStats();
+    });
+
+    // События видео для аналитики
+    this.video.addEventListener('play', () => this.trackEvent('play'));
+    this.video.addEventListener('pause', () => this.trackEvent('pause'));
+    this.video.addEventListener('ended', () => this.trackEvent('ended'));
+    this.video.addEventListener('error', (e) => this.trackError(e));
+    this.video.addEventListener('waiting', () => this.trackEvent('buffer_start'));
+    this.video.addEventListener('playing', () => this.trackEvent('buffer_end'));
+
+    // Обновление статистики
+    setInterval(() => this.updateStats(), 1000);
+
+    // Адаптивное качество на основе скорости соединения
+    if ('connection' in navigator) {
+      navigator.connection.addEventListener('change', () => {
+        this.adaptToConnection();
+      });
+    }
+  }
+
+  async startPollingForContent() {
+    const showLoadingScreen = () => {
+      document.getElementById('loading-overlay').style.display = 'flex';
+    };
+
+    const hideLoadingScreen = () => {
+      document.getElementById('loading-overlay').style.display = 'none';
+    };
+
+    // Если уже есть готовый контент - используем его
+    if (this.options.hlsUrl || this.options.dashUrl || this.options.videoUrl) {
+      hideLoadingScreen();
+      return;
+    }
+
+    showLoadingScreen();
+
+    // Опрашиваем сервер на предмет готовности контента
+    const pollForReady = async () => {
+      try {
+        const response = await fetch(`/api/video-status/${this.options.videoId}/`);
+        const data = await response.json();
+
+        document.getElementById('loading-progress').textContent =
+          `Обработано: ${data.qualities_ready || 0} качеств`;
+
+        if (data.status === 'ready' && data.hls_url) {
+          this.options.hlsUrl = data.hls_url;
+          this.options.dashUrl = data.dash_url;
+          hideLoadingScreen();
+          this.initPlayer();
+          return;
+        }
+
+        if (data.status === 'preview_ready' && data.hls_url) {
+          // Показываем превью качество
+          this.options.hlsUrl = data.hls_url;
+          hideLoadingScreen();
+          this.initPlayer();
+          this.showNotification('Превью готово. Дополнительные качества обрабатываются...', 'success');
+
+          // Продолжаем опрос для получения полных качеств
+          setTimeout(pollForReady, this.options.pollInterval);
+          return;
+        }
+
+        // Продолжаем опрос
+        setTimeout(pollForReady, this.options.pollInterval);
+
+      } catch (error) {
+        console.error('Ошибка при проверке статуса:', error);
+        this.showNotification('Ошибка загрузки видео', 'error');
+        hideLoadingScreen();
+      }
+    };
+
+    pollForReady();
+  }
+
+  detectOptimalFormat() {
+    const connection = navigator.connection;
+    let preferredFormat = 'hls'; // По умолчанию HLS
+
+    if (connection) {
+      // DASH лучше для быстрых соединений
+      if (connection.effectiveType === '4g' && connection.downlink > 5) {
+        preferredFormat = 'dash';
+      }
+      // HLS для медленных соединений
+      else if (connection.effectiveType === '3g' || connection.downlink < 2) {
+        preferredFormat = 'hls';
+      }
+    }
+
+    // Проверяем поддержку браузером
+    if (preferredFormat === 'dash' && !this.supportsDash()) {
+      preferredFormat = 'hls';
+    }
+    if (preferredFormat === 'hls' && !this.supportsHls()) {
+      preferredFormat = 'mp4';
+    }
+
+    document.getElementById('format-selector').value = preferredFormat;
+    this.changeFormat(preferredFormat);
+  }
+
+  initPlayer() {
+    const format = document.getElementById('format-selector').value;
+    this.changeFormat(format);
+  }
+
+  changeFormat(format) {
+    this.cleanup();
+    this.currentFormat = format;
+
+    switch(format) {
+      case 'hls':
+        this.initHLS();
+        break;
+      case 'dash':
+        this.initDASH();
+        break;
+      case 'mp4':
+        this.initMP4();
+        break;
+    }
+
+    this.analytics.qualityChanges++;
+  }
+
+  initHLS() {
+    if (!this.options.hlsUrl) return;
+
+    if (Hls.isSupported()) {
+      this.player = new Hls({
+        startLevel: -1, // Автовыбор качества
+        capLevelToPlayerSize: true,
+        maxBufferLength: 60
+      });
+
+      this.player.loadSource(this.options.hlsUrl);
+      this.player.attachMedia(this.video);
+
+      this.player.on(Hls.Events.MANIFEST_PARSED, () => {
+        this.populateQualityOptions();
+      });
+
+      this.player.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
+        this.updateCurrentQuality(data.level);
+      });
+
+      this.player.on(Hls.Events.ERROR, (event, data) => {
+        this.handlePlayerError('HLS', data);
+      });
+
+    } else if (this.video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Safari нативная поддержка
+      this.video.src = this.options.hlsUrl;
+    }
+  }
+
+  initDASH() {
+    if (!this.options.dashUrl || !this.supportsDash()) return;
+
+    this.player = dashjs.MediaPlayer().create();
+    this.player.initialize(this.video, this.options.dashUrl, true);
+
+    this.player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, () => {
+      this.populateQualityOptions();
+    });
+
+    this.player.on(dashjs.MediaPlayer.events.QUALITY_CHANGE_RENDERED, (e) => {
+      if (e.mediaType === 'video') {
+        this.updateCurrentQuality(e.newQuality);
+      }
+    });
+  }
+
+  initMP4() {
+    if (!this.options.videoUrl) return;
+    this.video.src = this.options.videoUrl;
+
+    // Для MP4 нет выбора качества
+    const selector = document.getElementById('quality-selector');
+    selector.innerHTML = '<option value="original">Оригинал</option>';
+  }
+
+  populateQualityOptions() {
+    const selector = document.getElementById('quality-selector');
+    selector.innerHTML = '<option value="auto">Авто</option>';
+
+    let qualities = [];
+
+    if (this.currentFormat === 'hls' && this.player && this.player.levels) {
+      qualities = this.player.levels.map((level, i) => ({
+        index: i,
+        height: level.height || '?',
+        bitrate: Math.round(level.bitrate/1000) || '?'
+      }));
+    } else if (this.currentFormat === 'dash' && this.player) {
+      const bitrateList = this.player.getBitrateInfoListFor('video');
+      qualities = bitrateList.map(bitrate => ({
+        index: bitrate.qualityIndex,
+        height: bitrate.height,
+        bitrate: Math.round(bitrate.bitrate/1000)
+      }));
+    }
+
+    qualities.forEach(quality => {
+      const option = document.createElement('option');
+      option.value = quality.index;
+      option.text = `${quality.height}p (${quality.bitrate}k)`;
+      selector.appendChild(option);
+    });
+  }
+
+  changeQuality(qualityIndex) {
+    if (qualityIndex === 'auto') {
+      if (this.currentFormat === 'hls' && this.player) {
+        this.player.currentLevel = -1;
+      } else if (this.currentFormat === 'dash' && this.player) {
+        this.player.setAutoSwitchQualityFor('video', true);
+      }
+    } else {
+      const index = parseInt(qualityIndex);
+      if (this.currentFormat === 'hls' && this.player) {
+        this.player.currentLevel = index;
+      } else if (this.currentFormat === 'dash' && this.player) {
+        this.player.setAutoSwitchQualityFor('video', false);
+        this.player.setQualityFor('video', index);
+      }
+    }
+
+    this.analytics.qualityChanges++;
+  }
+
+  adaptToConnection() {
+    const connection = navigator.connection;
+    if (!connection) return;
+
+    // Автоматически переключаем качество в зависимости от скорости
+    let targetQuality = 'auto';
+
+    if (connection.effectiveType === '2g' || connection.downlink < 0.5) {
+      // Самое низкое качество для медленного соединения
+      targetQuality = '0';
+    } else if (connection.effectiveType === '3g' || connection.downlink < 2) {
+      // Среднее качество
+      targetQuality = '1';
+    }
+
+    if (targetQuality !== 'auto') {
+      this.changeQuality(targetQuality);
+      this.showNotification(`Качество изменено из-за медленного соединения`, 'info');
+    }
+  }
+
+  updateStats() {
+    const video = this.video;
+
+    // Базовая статистика
+    this.stats = {
+      resolution: video.videoWidth && video.videoHeight ?
+        `${video.videoWidth}x${video.videoHeight}` : '-',
+
+      buffer: video.buffered.length > 0 ?
+        `${(video.buffered.end(video.buffered.length-1) - video.currentTime).toFixed(1)}s` : '0s',
+
+      network: navigator.connection ?
+        `${navigator.connection.effectiveType} (${navigator.connection.downlink}Mbps)` : '-'
+    };
+
+    // Специфичная для плеера статистика
+    if (this.currentFormat === 'hls' && this.player && this.player.stats) {
+      const stats = this.player.stats;
+      this.stats.bitrate = `${Math.round(stats.bandwidth/1000)}k`;
+      this.stats.dropped = stats.droppedFrames || 0;
+    } else if (this.currentFormat === 'dash' && this.player) {
+      const dashMetrics = this.player.getDashMetrics();
+      if (dashMetrics) {
+        this.stats.bitrate = `${Math.round(this.player.getAverageThroughput('video')/1000)}k`;
+      }
+    }
+
+    // Обновляем UI
+    this.updateStatsDisplay();
+  }
+
+  updateStatsDisplay() {
+    document.getElementById('stat-resolution').textContent = this.stats.resolution || '-';
+    document.getElementById('stat-bitrate').textContent = this.stats.bitrate || '-';
+    document.getElementById('stat-buffer').textContent = this.stats.buffer || '-';
+    document.getElementById('stat-dropped').textContent = this.stats.dropped || '0';
+    document.getElementById('stat-network').textContent = this.stats.network || '-';
+  }
+
+  toggleStats() {
+    const panel = document.getElementById('video-stats');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  }
+
+  showNotification(message, type = 'info') {
+    const container = document.getElementById('notifications');
+    const notification = document.createElement('div');
+
+    notification.className = `notification ${type}`;
+    notification.textContent = message;
+
+    container.appendChild(notification);
+
+    setTimeout(() => {
+      if (notification.parentNode) {
+        notification.parentNode.removeChild(notification);
+      }
+    }, 5000);
+  }
+
+  trackEvent(eventType) {
+    const event = {
+      type: eventType,
+      timestamp: Date.now(),
+      currentTime: this.video.currentTime,
+      quality: this.getCurrentQuality(),
+      format: this.currentFormat
+    };
+
+    this.analytics[eventType] = (this.analytics[eventType] || 0) + 1;
+
+    if (eventType === 'buffer_start') {
+      this.analytics.bufferEvents++;
+    }
+
+    // Отправляем аналитику на сервер
+    this.sendAnalytics(event);
+  }
+
+  trackError(error) {
+    const errorData = {
+      type: 'error',
+      message: error.message || 'Unknown error',
+      timestamp: Date.now(),
+      format: this.currentFormat
+    };
+
+    this.analytics.errors.push(errorData);
+    this.sendAnalytics(errorData);
+    this.showNotification('Ошибка воспроизведения видео', 'error');
+  }
+
+  sendAnalytics(data) {
+    if (!this.options.analyticsEndpoint) return;
+
+    // Не блокируем UI, отправляем асинхронно
+    setTimeout(() => {
+      fetch(this.options.analyticsEndpoint, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          video_id: this.options.videoId,
+          session_id: this.options.sessionId,
+          ...data
+        })
+      }).catch(() => {}); // Игнорируем ошибки аналитики
+    }, 0);
+  }
+
+  getCurrentQuality() {
+    const selector = document.getElementById('quality-selector');
+    return selector.value;
+  }
+
+  supportsHls() {
+    return Hls.isSupported() || this.video.canPlayType('application/vnd.apple.mpegurl');
+  }
+
+  supportsDash() {
+    return typeof dashjs !== 'undefined' && dashjs.supportsMediaSource();
+  }
+
+  handlePlayerError(playerType, error) {
+    console.error(`${playerType} Error:`, error);
+    this.trackError(error);
+
+    // Попытка переключения на другой формат при критических ошибках
+    if (error.fatal) {
+      this.showNotification(`Ошибка ${playerType}. Попытка переключения формата...`, 'error');
+      this.tryFallbackFormat();
+    }
+  }
+
+  tryFallbackFormat() {
+    const currentFormat = this.currentFormat;
+
+    if (currentFormat === 'dash' && this.options.hlsUrl) {
+      this.changeFormat('hls');
+    } else if (currentFormat === 'hls' && this.options.videoUrl) {
+      this.changeFormat('mp4');
+    } else if (currentFormat === 'mp4' && this.options.dashUrl) {
+      this.changeFormat('dash');
+    }
+  }
+
+  cleanup() {
+    if (this.player && typeof this.player.destroy === 'function') {
+      this.player.destroy();
+    }
+    this.player = null;
+    this.video.src = '';
+  }
+}
+
+// Инициализируем плеер
+document.addEventListener('DOMContentLoaded', () => {
+  window.smartPlayer = new SmartVideoPlayer({
+    videoId: "{{ video_id }}",
+    sessionId: "{{ session_id|default:'anonymous' }}"
+  });
+});
+</script>
