@@ -1,0 +1,350 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [ published ]
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # ============================================================================
+  # ТЕСТИРОВАНИЕ
+  # ============================================================================
+  test:
+    name: Tests (Python ${{ matrix.python }}, Django ${{ matrix.django }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        django: ["4.2", "5.0", "5.1"]
+        exclude:
+          # Django 5.0+ требует Python 3.10+
+          - python: "3.9"
+            django: "5.0"
+          - python: "3.9"
+            django: "5.1"
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python }}
+        cache: 'pip'
+        cache-dependency-path: 'pyproject.toml'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg ffprobe
+        ffmpeg -version
+        ffprobe -version
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+        pip install "Django~=${{ matrix.django }}.0"
+
+    - name: Run linting
+      run: |
+        black --check src/ tests/
+        isort --check-only src/ tests/
+        flake8 src/ tests/
+
+    - name: Run type checking
+      run: |
+        mypy src/hlsfield/
+
+    - name: Run unit tests
+      run: |
+        python -m pytest tests/ -v --cov=hlsfield --cov-report=xml --cov-report=html
+      env:
+        DJANGO_SETTINGS_MODULE: tests.settings
+        REDIS_URL: redis://localhost:6379/0
+
+    - name: Run integration tests
+      run: |
+        python -m pytest tests/ -m integration -v --tb=short
+      env:
+        DJANGO_SETTINGS_MODULE: tests.settings
+        REDIS_URL: redis://localhost:6379/0
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-${{ matrix.python }}-${{ matrix.django }}
+
+  # ============================================================================
+  # ПРОВЕРКА БЕЗОПАСНОСТИ
+  # ============================================================================
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        pip install safety bandit
+        pip install -e .
+
+    - name: Run safety check
+      run: safety check
+
+    - name: Run bandit security linter
+      run: bandit -r src/
+
+  # ============================================================================
+  # ТЕСТИРОВАНИЕ ПАКЕТА
+  # ============================================================================
+  package:
+    name: Package Test
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install build tools
+      run: pip install build twine
+
+    - name: Build package
+      run: python -m build
+
+    - name: Check package
+      run: |
+        twine check dist/*
+        pip install dist/*.whl
+        python -c "import hlsfield; print(f'Version: {hlsfield.__version__}')"
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: dist
+        path: dist/
+
+  # ============================================================================
+  # ТЕСТИРОВАНИЕ ДОКУМЕНТАЦИИ
+  # ============================================================================
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        pip install -e ".[dev]"
+        pip install mkdocs mkdocs-material
+
+    - name: Build docs
+      run: mkdocs build --strict
+
+    - name: Test README rendering
+      run: |
+        pip install readme-renderer
+        python -m readme_renderer README.md > /tmp/readme.html
+
+  # ============================================================================
+  # МАТРИЧНОЕ ТЕСТИРОВАНИЕ STORAGE
+  # ============================================================================
+  storage-test:
+    name: Storage Backend Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        storage: [local, s3, gcs]
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
+
+    - name: Install storage-specific dependencies
+      run: |
+        pip install -e ".[dev]"
+        if [ "${{ matrix.storage }}" = "s3" ]; then
+          pip install boto3 moto[s3]
+        elif [ "${{ matrix.storage }}" = "gcs" ]; then
+          pip install google-cloud-storage
+        fi
+
+    - name: Run storage tests
+      run: |
+        python -m pytest tests/test_storage.py::Test${{ matrix.storage|title }}Storage -v
+      env:
+        STORAGE_BACKEND: ${{ matrix.storage }}
+
+  # ============================================================================
+  # PERFORMANCE ТЕСТЫ
+  # ============================================================================
+  performance:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
+        pip install -e ".[dev]"
+        pip install pytest-benchmark
+
+    - name: Run performance tests
+      run: |
+        python -m pytest tests/test_performance.py -v --benchmark-only --benchmark-json=benchmark.json
+
+    - name: Store benchmark result
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: 'pytest'
+        output-file-path: benchmark.json
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: true
+
+  # ============================================================================
+  # ПУБЛИКАЦИЯ НА TEST PYPI
+  # ============================================================================
+  test-publish:
+    name: Test Publish
+    runs-on: ubuntu-latest
+    needs: [test, security, package]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    environment:
+      name: test-pypi
+      url: https://test.pypi.org/project/django-hlsfield/
+
+    permissions:
+      id-token: write  # OIDC for PyPI
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: dist
+        path: dist/
+
+    - name: Publish to Test PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        repository-url: https://test.pypi.org/legacy/
+        skip-existing: true
+
+  # ============================================================================
+  # ПУБЛИКАЦИЯ НА PRODUCTION PYPI
+  # ============================================================================
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [test, security, package]
+    if: github.event_name == 'release'
+
+    environment:
+      name: pypi
+      url: https://pypi.org/project/django-hlsfield/
+
+    permissions:
+      id-token: write  # OIDC for PyPI
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: dist
+        path: dist/
+
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+
+  # ============================================================================
+  # DOCKER BUILD & PUSH
+  # ============================================================================
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: github.event_name == 'push'
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v4
+      with:
+        images: ghcr.io/${{ github.repository }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+
+    - name: Build and push
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: ./examples/docker/Dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+

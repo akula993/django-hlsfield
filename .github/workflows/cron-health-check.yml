@@ -1,0 +1,72 @@
+name: Scheduled Health Checks
+
+on:
+  schedule:
+    # Каждый день в 2:00 UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    name: Health Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
+        pip install -e ".[dev]"
+
+    - name: Test PyPI installation
+      run: |
+        pip install django-hlsfield
+        python -c "
+        import hlsfield
+        print('✅ PyPI installation works')
+        print(f'Version: {hlsfield.__version__}')
+        "
+
+    - name: Test FFmpeg integration
+      run: |
+        python -c "
+        import subprocess
+        result = subprocess.run(['ffmpeg', '-version'], capture_output=True)
+        assert result.returncode == 0, 'FFmpeg not working'
+        print('✅ FFmpeg integration works')
+        "
+
+    - name: Run smoke tests
+      run: |
+        python -m pytest tests/test_smoke.py -v
+
+    - name: Check documentation links
+      run: |
+        pip install linkchecker
+        # linkchecker README.md --check-extern
+
+  dependencies-audit:
+    name: Dependencies Audit
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+
+    - name: Install and audit dependencies
+      run: |
+        pip install pip-audit
+        pip install -e .
+        pip-audit
+
+    - name: Check for outdated packages
+      run: |
+        pip list --outdated
+
