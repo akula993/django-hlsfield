@@ -45,6 +45,8 @@ __copyright__ = "Copyright 2025 akula993"
 # Статус разработки
 __status__ = "Production/Stable"
 
+from django.core.exceptions import ImproperlyConfigured
+
 # ==============================================================================
 # ОСНОВНЫЕ ИМПОРТЫ
 # ==============================================================================
@@ -247,7 +249,7 @@ def check_django_version():
         import django
         from packaging import version
 
-        django_version = version.parse(django.VERSION[:2])
+        django_version = version.parse("{}.{}".format(*django.VERSION[:2]))
         min_version = version.parse("4.2")
 
         if django_version < min_version:
@@ -281,7 +283,7 @@ try:
     if getattr(settings, 'DEBUG', False):
         check_django_version()
         check_python_version()
-except ImportError:
+except (ImportError, ImproperlyConfigured):
     # Django еще не настроен
     pass
 
@@ -344,11 +346,12 @@ default_app_config = 'hlsfield.apps.HLSFieldConfig'
 # При первом импорте показываем краткую информацию (только в DEBUG)
 try:
     from django.conf import settings
+    from django.core.exceptions import ImproperlyConfigured
 
     if getattr(settings, 'DEBUG', False):
         import sys
 
         if 'runserver' in sys.argv or 'shell' in sys.argv:
             print(f"🎬 {__title__} v{__version__} loaded")
-except (ImportError, AttributeError):
+except (ImportError, ImproperlyConfigured, AttributeError):
     pass

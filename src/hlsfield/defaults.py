@@ -32,9 +32,15 @@ def _get_django_settings():
     """Безопасно получает объект Django settings"""
     try:
         from django.conf import settings as django_settings
+        from django.core.exceptions import ImproperlyConfigured
         configured = getattr(django_settings, "configured", False)
-        return django_settings if configured else None
-    except ImportError:
+        if not configured:
+            return None
+
+        # Пробуем обратиться к настройкам
+        django_settings.DEBUG  # Это вызовет ImproperlyConfigured если не настроено
+        return django_settings
+    except (ImportError, ImproperlyConfigured):
         # Django не установлен
         return None
     except Exception:

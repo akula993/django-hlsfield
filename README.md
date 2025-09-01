@@ -25,6 +25,9 @@ Django-библиотека для автоматической обработк
 
 ```bash
 pip install django-hlsfield
+
+pip install django-hlsfield[all]
+pip install django-hlsfield[dev]
 ```
 
 **Требования:** ffmpeg и ffprobe должны быть установлены в системе

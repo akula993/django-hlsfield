@@ -197,40 +197,47 @@ def check_hlsfield_settings(app_configs, **kwargs) -> List[CheckWarning]:
 def check_storage_configuration(app_configs, **kwargs) -> List[CheckWarning]:
     """Проверяет настройки storage"""
 
+    from django.core.exceptions import ImproperlyConfigured
     warnings = []
 
-    # Проверяем MEDIA_ROOT если используется локальное хранение
-    if hasattr(settings, 'DEFAULT_FILE_STORAGE'):
-        if 'FileSystemStorage' in settings.DEFAULT_FILE_STORAGE:
-            media_root = getattr(settings, 'MEDIA_ROOT', '')
+    try:
+        from django.conf import settings
+        # Проверяем MEDIA_ROOT если используется локальное хранение
+        if hasattr(settings, 'DEFAULT_FILE_STORAGE'):
+            if 'FileSystemStorage' in settings.DEFAULT_FILE_STORAGE:
+                media_root = getattr(settings, 'MEDIA_ROOT', '')
 
-            if not media_root:
-                warnings.append(
-                    CheckWarning(
-                        'MEDIA_ROOT not set with FileSystemStorage',
-                        hint='Set MEDIA_ROOT for file uploads to work properly',
-                        obj='django.settings',
-                        id='hlsfield.W004',
+                if not media_root:
+                    warnings.append(
+                        CheckWarning(
+                            'MEDIA_ROOT not set with FileSystemStorage',
+                            hint='Set MEDIA_ROOT for file uploads to work properly',
+                            obj='django.settings',
+                            id='hlsfield.W004',
+                        )
                     )
-                )
-            elif not os.path.exists(media_root):
-                warnings.append(
-                    CheckWarning(
-                        f'MEDIA_ROOT directory does not exist: {media_root}',
-                        hint='Create the directory or update MEDIA_ROOT setting',
-                        obj='django.settings',
-                        id='hlsfield.W005',
+                elif not os.path.exists(media_root):
+                    warnings.append(
+                        CheckWarning(
+                            f'MEDIA_ROOT directory does not exist: {media_root}',
+                            hint='Create the directory or update MEDIA_ROOT setting',
+                            obj='django.settings',
+                            id='hlsfield.W005',
+                        )
                     )
-                )
-            elif not os.access(media_root, os.W_OK):
-                warnings.append(
-                    CheckWarning(
-                        f'MEDIA_ROOT is not writable: {media_root}',
-                        hint='Check directory permissions',
-                        obj='django.settings',
-                        id='hlsfield.W006',
+                elif not os.access(media_root, os.W_OK):
+                    warnings.append(
+                        CheckWarning(
+                            f'MEDIA_ROOT is not writable: {media_root}',
+                            hint='Check directory permissions',
+                            obj='django.settings',
+                            id='hlsfield.W006',
+                        )
                     )
-                )
+
+    except (ImportError, ImproperlyConfigured):
+        # Django не настроен
+        pass
 
     return warnings
 
