@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "django-hlsfield"
-version = "1.0.3"
+version = "1.0.4"
 description = "Django VideoField + HLSVideoField: metadata, preview frame, automatic HLS/DASH, Celery optional."
 readme = "README.md"
 requires-python = ">=3.10"

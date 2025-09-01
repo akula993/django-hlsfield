@@ -1,0 +1,20 @@
+# Конфигурация для pip-audit
+
+[tool.pip-audit]
+# Исключаем локальные/dev пакеты
+ignore-packages = [
+    "django-hlsfield"  # Локальный dev пакет, не на PyPI
+]
+
+# Игнорируем ложные срабатывания если есть
+# ignore-vulns = [
+#     "PYSEC-2023-12345"  # Пример: false positive
+# ]
+
+# Форматы вывода
+format = "table"
+output = "pip-audit-results.json"
+
+# Дополнительные настройки
+desc = true           # Показывать описание уязвимостей
+summary = true        # Показывать итоговую сводку
