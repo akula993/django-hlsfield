@@ -1,4 +1,3 @@
-# src/hlsfield/__init__.py
 """
 🎬 django-hlsfield - Django адаптивное видео с HLS/DASH стримингом
 
@@ -31,7 +30,7 @@ GitHub: https://github.com/akula993/django-hlsfield
 """
 
 # Версия пакета (семантическое версионирование)
-__version__ = "1.0.1"
+__version__ = "1.0.4"
 
 # Метаданные пакета
 __title__ = "django-hlsfield"

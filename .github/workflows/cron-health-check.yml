@@ -25,7 +25,7 @@ jobs:
 
     - name: Test PyPI installation
       run: |
-        pip install django-hlsfield
+        pip install django-hlsfield --upgrade
         python -c "
         import hlsfield
         print('✅ PyPI installation works')
