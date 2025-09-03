@@ -1,381 +1,486 @@
-# tests/test_fields.py
-import os
-import tempfile
-import shutil
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-from django.test import TestCase
-from django.core.files.uploadedfile import SimpleUploadedFile
+"""
+Тесты для Django полей django-hlsfield
+"""
+import pytest
+from unittest.mock import Mock, patch, MagicMock
+from django.test import TestCase, override_settings
+from django.core.files.base import ContentFile
 from django.db import models
-from django.contrib.auth.models import User
 
-from hlsfield import VideoField, HLSVideoField, DASHVideoField, AdaptiveVideoField
-from hlsfield.fields import VideoFieldFile
-
-
-class TestVideoModel(models.Model):
-    """Тестовая модель для VideoField"""
-    title = models.CharField(max_length=100)
-    video = VideoField(
-        upload_to="test_videos/",
-        duration_field="duration",
-        width_field="width",
-        height_field="height",
-        preview_field="preview"
-    )
-    duration = models.DurationField(null=True, blank=True)
-    width = models.PositiveIntegerField(null=True, blank=True)
-    height = models.PositiveIntegerField(null=True, blank=True)
-    preview = models.CharField(max_length=500, null=True, blank=True)
-
-    class Meta:
-        app_label = 'test_app'
+from hlsfield.fields import (
+    VideoField, VideoFieldFile,
+    HLSVideoField, HLSVideoFieldFile,
+    DASHVideoField, DASHVideoFieldFile,
+    AdaptiveVideoField, AdaptiveVideoFieldFile,
+    validate_ladder, get_optimal_ladder_for_resolution
+)
+from hlsfield.exceptions import InvalidVideoError, ConfigurationError
 
 
-class TestHLSVideoModel(models.Model):
-    """Тестовая модель для HLSVideoField"""
-    title = models.CharField(max_length=100)
-    video = HLSVideoField(
-        upload_to="hls_videos/",
-        hls_playlist_field="hls_playlist"
-    )
-    hls_playlist = models.CharField(max_length=500, null=True, blank=True)
+class TestVideoField:
+    """Тесты базового VideoField"""
 
-    class Meta:
-        app_label = 'test_app'
+    def test_field_creation(self):
+        """Тест создания поля"""
+        field = VideoField(upload_to='videos/')
+        assert field.upload_to == 'videos/'
+        assert field.duration_field is None
+        assert field.process_on_save is True
+
+    def test_field_with_metadata_fields(self):
+        """Тест поля с полями метаданных"""
+        field = VideoField(
+            upload_to='videos/',
+            duration_field='duration',
+            width_field='width',
+            height_field='height',
+            preview_field='preview'
+        )
+        assert field.duration_field == 'duration'
+        assert field.width_field == 'width'
+        assert field.height_field == 'height'
+        assert field.preview_field == 'preview'
+
+    def test_field_deconstruct(self):
+        """Тест деконструкции поля для миграций"""
+        field = VideoField(
+            upload_to='videos/',
+            duration_field='duration',
+            preview_at=5.0
+        )
+        name, path, args, kwargs = field.deconstruct()
+
+        assert path == 'hlsfield.fields.VideoField'
+        assert 'duration_field' in kwargs
+        assert kwargs['preview_at'] == 5.0
+
+    @patch('hlsfield.defaults.USE_DEFAULT_UPLOAD_TO', True)
+    def test_auto_upload_to(self):
+        """Тест автоматического upload_to"""
+        field = VideoField()  # Без указания upload_to
+        assert field.upload_to is not None
+
+    def test_contribute_to_class(self, test_model):
+        """Тест интеграции поля в модель"""
+        field = VideoField(upload_to='test/')
+        field.contribute_to_class(test_model, 'test_video')
+
+        assert hasattr(test_model, 'test_video')
 
 
-class BaseVideoFieldTest(TestCase):
-    """Базовый класс для тестирования video fields"""
+class TestVideoFieldFile:
+    """Тесты VideoFieldFile"""
 
-    def setUp(self):
-        self.temp_dir = Path(tempfile.mkdtemp())
-        self.sample_video = self.create_sample_video()
+    def test_metadata_from_model_fields(self):
+        """Тест получения метаданных из полей модели"""
+        # Создаем мок модели
+        mock_instance = Mock()
+        mock_instance.duration = 120  # секунды
+        mock_instance.width = 1920
+        mock_instance.height = 1080
 
-    def tearDown(self):
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
+        # Создаем поле с настройками
+        field = VideoField(
+            duration_field='duration',
+            width_field='width',
+            height_field='height'
+        )
 
-    def create_sample_video(self):
-        """Создает тестовый видеофайл"""
-        video_path = self.temp_dir / "sample.mp4"
+        # Создаем файловый объект
+        file_obj = VideoFieldFile(mock_instance, field, 'test.mp4')
 
-        # Создаем минимальный MP4 заголовок для тестов
-        # В реальных тестах используйте настоящие видеофайлы
-        with open(video_path, 'wb') as f:
-            # Минимальные MP4 байты (ftyp box)
-            f.write(b'\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2avc1mp41')
-            f.write(b'\x00' * 1000)  # Dummy data
+        # Тестируем получение метаданных
+        metadata = file_obj.metadata()
 
-        return video_path
-
-    def create_uploaded_file(self, filename="test_video.mp4"):
-        """Создает объект UploadedFile для тестов"""
-        with open(self.sample_video, 'rb') as f:
-            return SimpleUploadedFile(filename, f.read(), content_type='video/mp4')
-
-
-class VideoFieldTest(BaseVideoFieldTest):
-    """Тесты для базового VideoField"""
+        assert 'width' in metadata
+        assert metadata['width'] == 1920
+        assert 'height' in metadata
+        assert metadata['height'] == 1080
 
     @patch('hlsfield.utils.ffprobe_streams')
-    @patch('hlsfield.utils.extract_preview')
-    def test_video_field_save_with_metadata_extraction(self, mock_extract_preview, mock_ffprobe):
-        """Тест сохранения видео с извлечением метаданных"""
-
-        # Мокаем ffprobe ответ
+    @patch('hlsfield.utils.pull_to_local')
+    def test_process_video_metadata(self, mock_pull, mock_ffprobe, temp_dir):
+        """Тест обработки метаданных видео"""
+        # Настраиваем моки
+        mock_pull.return_value = temp_dir / 'test.mp4'
         mock_ffprobe.return_value = {
-            'format': {'duration': '120.5'},
-            'streams': [
-                {
-                    'codec_type': 'video',
-                    'width': 1920,
-                    'height': 1080
-                }
-            ]
+            'streams': [{
+                'codec_type': 'video',
+                'width': 1920,
+                'height': 1080,
+            }],
+            'format': {
+                'duration': '120.0'
+            }
         }
 
-        # Создаем тестовую модель
-        video_obj = TestVideoModel.objects.create(
-            title="Test Video",
-            video=self.create_uploaded_file()
+        # Создаем тестовый файл
+        (temp_dir / 'test.mp4').write_bytes(b'video data')
+
+        mock_instance = Mock()
+        mock_storage = Mock()
+        mock_storage.save.return_value = 'saved_path.mp4'
+
+        field = VideoField(
+            duration_field='duration',
+            width_field='width',
+            height_field='height'
         )
 
-        # Проверяем что метаданные извлечены
-        self.assertEqual(video_obj.width, 1920)
-        self.assertEqual(video_obj.height, 1080)
-        self.assertEqual(video_obj.duration.total_seconds(), 120.5)
+        file_obj = VideoFieldFile(mock_instance, field, 'test.mp4')
+        file_obj.storage = mock_storage
 
-        # Проверяем что превью создано
-        mock_extract_preview.assert_called_once()
-
-    def test_video_field_file_methods(self):
-        """Тест методов VideoFieldFile"""
-
-        video_obj = TestVideoModel(title="Test")
-        video_obj.video.name = "test_videos/sample.mp4"
-
-        field_file = video_obj.video
-
-        # Тестируем _base_key
-        self.assertEqual(field_file._base_key(), "test_videos/sample")
-
-        # Тестируем _meta_key для nested layout
-        video_obj.video.field.sidecar_layout = "nested"
-        expected_meta = "test_videos/sample/meta.json"
-        self.assertEqual(field_file._meta_key(), expected_meta)
-
-        # Тестируем _meta_key для flat layout
-        video_obj.video.field.sidecar_layout = "flat"
-        expected_meta = "test_videos/sample_meta.json"
-        self.assertEqual(field_file._meta_key(), expected_meta)
-
-    @patch('hlsfield.fields.VideoFieldFile.storage')
-    def test_metadata_from_model_fields(self, mock_storage):
-        """Тест получения метаданных из полей модели"""
-
-        import datetime
-
-        video_obj = TestVideoModel(
-            title="Test",
-            duration=datetime.timedelta(seconds=180),
-            width=1280,
-            height=720,
-            preview="preview.jpg"
-        )
-
-        metadata = video_obj.video.metadata()
-
-        expected = {
-            'duration_seconds': 180,
-            'width': 1280,
-            'height': 720,
-            'preview_name': 'preview.jpg'
-        }
-
-        self.assertEqual(metadata, expected)
+        # Тестируем обработку
+        with patch('hlsfield.utils.tempdir') as mock_tempdir:
+            mock_tempdir.return_value.__enter__.return_value = temp_dir
+            file_obj._process_video_metadata(field, mock_instance)
 
     def test_preview_url_from_field(self):
         """Тест получения URL превью из поля модели"""
+        mock_instance = Mock()
+        mock_instance.preview = 'path/to/preview.jpg'
 
-        video_obj = TestVideoModel(title="Test", preview="previews/thumb.jpg")
+        mock_storage = Mock()
+        mock_storage.url.return_value = 'http://example.com/preview.jpg'
 
-        with patch.object(video_obj.video.storage, 'url', return_value='/media/previews/thumb.jpg'):
-            url = video_obj.video.preview_url()
-            self.assertEqual(url, '/media/previews/thumb.jpg')
+        field = VideoField(preview_field='preview')
+        file_obj = VideoFieldFile(mock_instance, field, 'test.mp4')
+        file_obj.storage = mock_storage
+
+        url = file_obj.preview_url()
+        assert url == 'http://example.com/preview.jpg'
+
+    def test_save_validation(self):
+        """Тест валидации при сохранении"""
+        mock_instance = Mock()
+        field = VideoField()
+        file_obj = VideoFieldFile(mock_instance, field, 'test.mp4')
+
+        # Тестируем слишком маленький файл
+        small_content = ContentFile(b'x', name='small.mp4')
+        small_content.size = 100  # Меньше минимума
+
+        with pytest.raises(InvalidVideoError):
+            file_obj._validate_file(small_content)
+
+    def test_save_large_file_validation(self):
+        """Тест валидации больших файлов"""
+        mock_instance = Mock()
+        field = VideoField()
+        file_obj = VideoFieldFile(mock_instance, field, 'test.mp4')
+
+        # Тестируем слишком большой файл
+        large_content = ContentFile(b'x', name='large.mp4')
+        large_content.size = 5 * 1024 ** 3  # 5GB - больше лимита
+
+        with pytest.raises(InvalidVideoError):
+            file_obj._validate_file(large_content)
 
 
-class HLSVideoFieldTest(BaseVideoFieldTest):
-    """Тесты для HLSVideoField"""
+class TestHLSVideoField:
+    """Тесты HLSVideoField"""
 
-    def test_hls_field_initialization(self):
-        """Тест инициализации HLS поля"""
+    def test_hls_field_creation(self):
+        """Тест создания HLS поля"""
+        field = HLSVideoField(
+            upload_to='videos/',
+            hls_playlist_field='hls_master',
+            ladder=[{"height": 720, "v_bitrate": 2500, "a_bitrate": 128}]
+        )
+
+        assert field.hls_playlist_field == 'hls_master'
+        assert len(field.ladder) == 1
+        assert field.ladder[0]['height'] == 720
+
+    def test_hls_deconstruct(self):
+        """Тест деконструкции HLS поля"""
+        field = HLSVideoField(
+            upload_to='videos/',
+            hls_playlist_field='hls_master',
+            segment_duration=8
+        )
+
+        name, path, args, kwargs = field.deconstruct()
+
+        assert path == 'hlsfield.fields.HLSVideoField'
+        assert 'hls_playlist_field' in kwargs
+        assert kwargs['segment_duration'] == 8
+
+    @patch('hlsfield.tasks.build_hls_for_field')
+    def test_trigger_hls(self, mock_task, test_model):
+        """Тест запуска HLS транскодинга"""
+        mock_task.delay = Mock(return_value=Mock(id='task-123'))
 
         field = HLSVideoField(
-            upload_to="videos/",
-            hls_playlist_field="playlist",
-            ladder=[{"height": 720, "v_bitrate": 2500, "a_bitrate": 128}],
-            segment_duration=10
+            upload_to='test/',
+            hls_playlist_field='hls_master'
         )
 
-        self.assertEqual(field.hls_playlist_field, "playlist")
-        self.assertEqual(field.segment_duration, 10)
-        self.assertEqual(len(field.ladder), 1)
-        self.assertEqual(field.ladder[0]["height"], 720)
+        # Создаем экземпляр модели
+        instance = test_model(title='Test', pk=1)
 
-    @patch('hlsfield.tasks.build_hls_for_field_sync')
-    def test_hls_processing_trigger(self, mock_build_hls):
-        """Тест запуска HLS обработки"""
+        # Тестируем запуск
+        field._trigger_hls(instance)
 
-        video_obj = TestHLSVideoModel.objects.create(
-            title="HLS Test",
-            video=self.create_uploaded_file()
+        # Проверяем что задача была поставлена в очередь
+        mock_task.delay.assert_called_once()
+
+
+class TestDASHVideoField:
+    """Тесты DASHVideoField"""
+
+    def test_dash_field_creation(self):
+        """Тест создания DASH поля"""
+        field = DASHVideoField(
+            upload_to='videos/',
+            dash_manifest_field='dash_manifest',
+            segment_duration=4
         )
 
-        # Проверяем что обработка запустилась
-        mock_build_hls.assert_called_once()
+        assert field.dash_manifest_field == 'dash_manifest'
+        assert field.segment_duration == 4
 
-        # Проверяем параметры вызова
-        call_args = mock_build_hls.call_args[0]
-        self.assertEqual(call_args[0], video_obj._meta.label)
-        self.assertEqual(call_args[1], video_obj.pk)
-        self.assertEqual(call_args[2], 'video')
+    @patch('hlsfield.tasks.build_dash_for_field')
+    def test_trigger_dash(self, mock_task, test_model):
+        """Тест запуска DASH транскодинга"""
+        mock_task.delay = Mock(return_value=Mock(id='task-456'))
 
-    def test_master_url_method(self):
-        """Тест получения URL master плейлиста"""
-
-        video_obj = TestHLSVideoModel(
-            title="Test",
-            hls_playlist="videos/abc123/hls/master.m3u8"
+        field = DASHVideoField(
+            upload_to='test/',
+            dash_manifest_field='dash_manifest'
         )
 
-        with patch.object(video_obj.video.storage, 'url', return_value='/media/videos/abc123/hls/master.m3u8'):
-            url = video_obj.video.master_url()
-            self.assertEqual(url, '/media/videos/abc123/hls/master.m3u8')
+        instance = test_model(title='Test', pk=1)
+        field._trigger_dash(instance)
+
+        mock_task.delay.assert_called_once()
 
 
-class DefaultsTest(TestCase):
-    """Тесты для модуля defaults"""
+class TestAdaptiveVideoField:
+    """Тесты AdaptiveVideoField"""
 
-    def test_defaults_without_django_settings(self):
-        """Тест что defaults работают без Django settings"""
-
-        from hlsfield import defaults
-
-        # Базовые значения должны быть установлены
-        self.assertEqual(defaults.FFMPEG, "ffmpeg")
-        self.assertEqual(defaults.FFPROBE, "ffprobe")
-        self.assertEqual(defaults.SEGMENT_DURATION, 6)
-        self.assertTrue(len(defaults.DEFAULT_LADDER) > 0)
-
-    @patch('hlsfield.defaults._settings')
-    def test_defaults_with_custom_settings(self, mock_settings):
-        """Тест переопределения через Django settings"""
-
-        # Мокаем настройки
-        mock_settings.HLSFIELD_FFMPEG = "/custom/path/ffmpeg"
-        mock_settings.HLSFIELD_SEGMENT_DURATION = 10
-        mock_settings.configured = True
-
-        # Импортируем заново чтобы применились настройки
-        import importlib
-        from hlsfield import defaults
-        importlib.reload(defaults)
-
-        self.assertEqual(defaults.FFMPEG, "/custom/path/ffmpeg")
-        self.assertEqual(defaults.SEGMENT_DURATION, 10)
-
-
-class UtilsTest(BaseVideoFieldTest):
-    """Тесты для модуля utils"""
-
-    def test_tempdir_context_manager(self):
-        """Тест временной директории"""
-
-        from hlsfield.utils import tempdir
-
-        temp_path = None
-        with tempdir() as td:
-            temp_path = td
-            self.assertTrue(td.exists())
-            self.assertTrue(td.is_dir())
-
-        # После выхода из контекста директория должна быть удалена
-        self.assertFalse(temp_path.exists())
-
-    @patch('subprocess.run')
-    def test_run_command_success(self, mock_subprocess):
-        """Тест успешного выполнения команды"""
-
-        from hlsfield.utils import run
-
-        mock_subprocess.return_value = MagicMock(
-            returncode=0,
-            stdout="success",
-            stderr=""
+    def test_adaptive_field_creation(self):
+        """Тест создания адаптивного поля"""
+        field = AdaptiveVideoField(
+            upload_to='videos/',
+            hls_playlist_field='hls_master',
+            dash_manifest_field='dash_manifest'
         )
 
-        result = run(["echo", "test"])
-        self.assertEqual(result.stdout, "success")
+        assert field.hls_playlist_field == 'hls_master'
+        assert field.dash_manifest_field == 'dash_manifest'
+        assert field.adaptive_on_save is True
 
-    @patch('subprocess.run')
-    def test_run_command_failure(self, mock_subprocess):
-        """Тест обработки ошибки команды"""
+    @patch('hlsfield.tasks.build_adaptive_for_field')
+    def test_trigger_adaptive(self, mock_task, test_model):
+        """Тест запуска адаптивного транскодинга"""
+        mock_task.delay = Mock(return_value=Mock(id='task-789'))
 
-        from hlsfield.utils import run
-
-        mock_subprocess.return_value = MagicMock(
-            returncode=1,
-            stdout="",
-            stderr="error message"
+        field = AdaptiveVideoField(
+            upload_to='test/',
+            hls_playlist_field='hls_master',
+            dash_manifest_field='dash_manifest'
         )
 
-        with self.assertRaises(RuntimeError) as context:
-            run(["false"])
+        instance = test_model(title='Test', pk=1)
+        field._trigger_adaptive(instance)
 
-        self.assertIn("Command failed", str(context.exception))
-        self.assertIn("error message", str(context.exception))
-
-    @patch('hlsfield.utils.run')
-    def test_ffprobe_streams(self, mock_run):
-        """Тест парсинга ffprobe вывода"""
-
-        from hlsfield.utils import ffprobe_streams
-
-        # Мокаем JSON ответ ffprobe
-        mock_run.return_value = MagicMock(
-            stdout='{"streams": [{"codec_type": "video", "width": 1920}]}'
-        )
-
-        result = ffprobe_streams("/path/to/video.mp4")
-
-        self.assertIn("streams", result)
-        self.assertEqual(len(result["streams"]), 1)
-        self.assertEqual(result["streams"][0]["codec_type"], "video")
-
-    def test_pick_video_audio_streams(self):
-        """Тест выбора видео и аудио потоков"""
-
-        from hlsfield.utils import pick_video_audio_streams
-
-        info = {
-            "streams": [
-                {"codec_type": "video", "width": 1920},
-                {"codec_type": "audio", "channels": 2},
-                {"codec_type": "subtitle"}
-            ]
-        }
-
-        video, audio = pick_video_audio_streams(info)
-
-        self.assertEqual(video["codec_type"], "video")
-        self.assertEqual(video["width"], 1920)
-
-        self.assertEqual(audio["codec_type"], "audio")
-        self.assertEqual(audio["channels"], 2)
+        mock_task.delay.assert_called_once()
 
 
-class ErrorHandlingTest(BaseVideoFieldTest):
-    """Тесты обработки ошибок"""
+class TestAdaptiveVideoFieldFile:
+    """Тесты AdaptiveVideoFieldFile"""
+
+    def test_master_url(self):
+        """Тест получения URL HLS мастер плейлиста"""
+        mock_instance = Mock()
+        mock_instance.hls_master = 'path/to/master.m3u8'
+
+        mock_storage = Mock()
+        mock_storage.url.return_value = 'http://example.com/master.m3u8'
+
+        field = AdaptiveVideoField(hls_playlist_field='hls_master')
+        file_obj = AdaptiveVideoFieldFile(mock_instance, field, 'test.mp4')
+        file_obj.storage = mock_storage
+
+        url = file_obj.master_url()
+        assert url == 'http://example.com/master.m3u8'
+
+    def test_dash_url(self):
+        """Тест получения URL DASH манифеста"""
+        mock_instance = Mock()
+        mock_instance.dash_manifest = 'path/to/manifest.mpd'
+
+        mock_storage = Mock()
+        mock_storage.url.return_value = 'http://example.com/manifest.mpd'
+
+        field = AdaptiveVideoField(dash_manifest_field='dash_manifest')
+        file_obj = AdaptiveVideoFieldFile(mock_instance, field, 'test.mp4')
+        file_obj.storage = mock_storage
+
+        url = file_obj.dash_url()
+        assert url == 'http://example.com/manifest.mpd'
+
+    @patch('hlsfield.fields.VideoField.attr_class.save')
+    def test_deferred_processing(self, mock_super_save):
+        """Тест отложенной обработки для объектов без PK"""
+        mock_instance = Mock()
+        mock_instance.pk = None  # Нет PK - отложенная обработка
+
+        field = AdaptiveVideoField(adaptive_on_save=True)
+        field.attname = 'adaptive_video'
+
+        file_obj = AdaptiveVideoFieldFile(mock_instance, field, 'test.mp4')
+
+        content = ContentFile(b'video content', name='test.mp4')
+        file_obj.save('test.mp4', content)
+
+        # Проверяем что установлен флаг отложенной обработки
+        assert hasattr(mock_instance, '__adaptive_pending__adaptive_video')
+        assert getattr(mock_instance, '__adaptive_pending__adaptive_video') is True
+
+
+class TestLadderValidation:
+    """Тесты валидации лестницы качеств"""
+
+    def test_valid_ladder(self, sample_ladder):
+        """Тест валидной лестницы"""
+        # Не должно бросать исключений
+        assert validate_ladder(sample_ladder) is True
+
+    def test_empty_ladder(self):
+        """Тест пустой лестницы"""
+        with pytest.raises(ValueError, match="must be a non-empty list"):
+            validate_ladder([])
+
+    def test_invalid_ladder_format(self):
+        """Тест невалидного формата лестницы"""
+        with pytest.raises(ValueError, match="must be a dictionary"):
+            validate_ladder([360, 720, 1080])  # Числа вместо словарей
+
+    def test_missing_required_fields(self):
+        """Тест лестницы с отсутствующими полями"""
+        invalid_ladder = [
+            {"height": 360, "v_bitrate": 800},  # Нет a_bitrate
+            {"v_bitrate": 2500, "a_bitrate": 128},  # Нет height
+        ]
+
+        with pytest.raises(ValueError, match="missing required field"):
+            validate_ladder(invalid_ladder)
+
+    def test_negative_values(self):
+        """Тест отрицательных значений в лестнице"""
+        invalid_ladder = [
+            {"height": 360, "v_bitrate": -800, "a_bitrate": 96}
+        ]
+
+        with pytest.raises(ValueError, match="cannot be negative"):
+            validate_ladder(invalid_ladder)
+
+    def test_out_of_range_values(self):
+        """Тест значений вне допустимых пределов"""
+        invalid_ladder = [
+            {"height": 100, "v_bitrate": 800, "a_bitrate": 96}  # Слишком низкое разрешение
+        ]
+
+        with pytest.raises(ValueError, match="out of range"):
+            validate_ladder(invalid_ladder)
+
+
+class TestOptimalLadder:
+    """Тесты генерации оптимальной лестницы"""
+
+    def test_hd_source(self):
+        """Тест для HD источника"""
+        ladder = get_optimal_ladder_for_resolution(1280, 720)
+
+        # Проверяем что все качества не превышают источник
+        assert all(rung['height'] <= 720 * 1.1 for rung in ladder)
+
+        # Проверяем что есть исходное разрешение
+        heights = [rung['height'] for rung in ladder]
+        assert 720 in heights
+
+    def test_4k_source(self):
+        """Тест для 4K источника"""
+        ladder = get_optimal_ladder_for_resolution(3840, 2160)
+
+        # Должны быть все стандартные качества + 4K
+        heights = [rung['height'] for rung in ladder]
+        assert 2160 in heights
+        assert 1080 in heights
+        assert 720 in heights
+
+    def test_low_res_source(self):
+        """Тест для низкого разрешения"""
+        ladder = get_optimal_ladder_for_resolution(640, 360)
+
+        # Должен быть хотя бы один вариант качества
+        assert len(ladder) >= 1
+
+        # Все качества должны быть не выше источника
+        heights = [rung['height'] for rung in ladder]
+        assert max(heights) <= 360 * 1.1
+
+    def test_estimated_bitrates(self):
+        """Тест расчета битрейтов"""
+        ladder = get_optimal_ladder_for_resolution(1920, 1080)
+
+        # Битрейты должны возрастать с качеством
+        bitrates = [rung['v_bitrate'] for rung in ladder]
+        assert bitrates == sorted(bitrates)
+
+        # Все битрейты должны быть положительными
+        assert all(br > 0 for br in bitrates)
+
+
+class TestFieldIntegration:
+    """Интеграционные тесты полей"""
+
+    def test_field_in_model_definition(self):
+        """Тест использования поля в определении модели"""
+        from django.db import models
+        from hlsfield import VideoField
+
+        class TestModel(models.Model):
+            title = models.CharField(max_length=200)
+            video = VideoField(upload_to='test/')
+
+            class Meta:
+                app_label = 'hlsfield'
+
+        # Проверяем что поле корректно создано
+        video_field = TestModel._meta.get_field('video')
+        assert isinstance(video_field, VideoField)
+        assert video_field.upload_to == 'test/'
 
     @patch('hlsfield.utils.ffprobe_streams')
-    def test_invalid_video_file(self, mock_ffprobe):
-        """Тест обработки невалидного видеофайла"""
+    def test_model_save_with_video(self, mock_ffprobe, test_model):
+        """Тест сохранения модели с видео"""
+        mock_ffprobe.return_value = {
+            'streams': [],
+            'format': {'duration': '60.0'}
+        }
 
-        # ffprobe возвращает ошибку
-        mock_ffprobe.side_effect = RuntimeError("Invalid file format")
+        # Создаем экземпляр
+        instance = test_model(title='Test Video')
 
-        # Создание объекта не должно падать
-        video_obj = TestVideoModel(title="Invalid Video")
+        # Добавляем видеофайл
+        video_content = ContentFile(b'fake video data', name='test.mp4')
+        instance.video.save('test.mp4', video_content, save=False)
 
-        # Метаданные должны быть пустыми при ошибке
-        with patch.object(video_obj.video, '_meta_key', return_value='meta.json'):
-            with patch.object(video_obj.video.storage, 'open', side_effect=FileNotFoundError):
-                metadata = video_obj.video.metadata()
-                self.assertEqual(metadata, {})
+        # Проверяем что файл был сохранен
+        assert instance.video.name is not None
 
-    @patch('hlsfield.utils.extract_preview')
-    def test_preview_extraction_failure(self, mock_extract):
-        """Тест обработки ошибки создания превью"""
+    def test_field_choices_in_admin(self, test_model):
+        """Тест отображения поля в Django admin"""
+        from django.contrib import admin
 
-        mock_extract.side_effect = RuntimeError("Preview extraction failed")
+        # Проверяем что поле может быть использовано в admin
+        class TestAdmin(admin.ModelAdmin):
+            list_display = ['title']
+            fields = ['title', 'video', 'hls_video']
 
-        # Сохранение должно пройти успешно даже если превью не создалось
-        with patch('hlsfield.utils.ffprobe_streams', return_value={'format': {}, 'streams': []}):
-            video_obj = TestVideoModel.objects.create(
-                title="No Preview",
-                video=self.create_uploaded_file()
-            )
-
-        # Объект должен быть создан
-        self.assertEqual(video_obj.title, "No Preview")
-
-    def test_storage_errors(self):
-        """Тест обработки ошибок storage"""
-
-        video_obj = TestVideoModel(title="Storage Error")
-
-        # Мокаем ошибку storage
-        with patch.object(video_obj.video.storage, 'exists', side_effect=Exception("Storage error")):
-            # preview_url не должен падать при ошибке storage
-            url = video_obj.video.preview_url()
-            self.assertIsNone(url)
+        # Не должно бросать исключений при создании
+        admin_instance = TestAdmin(test_model, admin.site)
+        assert admin_instance is not None

@@ -1,4 +1,3 @@
-# src/hlsfield/apps.py
 """
 🎬 Django App конфигурация для django-hlsfield
 

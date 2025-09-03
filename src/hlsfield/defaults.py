@@ -1,4 +1,3 @@
-# src/hlsfield/defaults.py
 """
 🔧 Настройки по умолчанию для django-hlsfield
 

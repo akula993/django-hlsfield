@@ -1,4 +1,3 @@
-# src/hlsfield/signals.py
 """
 🎬 Django сигналы для django-hlsfield
 

@@ -1,4 +1,3 @@
-# src/hlsfield/exceptions.py
 """
 🚨 Пользовательские исключения для django-hlsfield
 

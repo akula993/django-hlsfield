@@ -1,5 +1,3 @@
-# src/hlsfield/progressive_tasks.py
-
 import time
 from pathlib import Path
 from typing import List, Dict, Any

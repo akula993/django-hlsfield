@@ -8,4 +8,5 @@ pip-audit>=2.9.0
 bandit>=1.7.5
 # Базовые зависимости (безопасные версии)
 Django>=4.2.0,<6.0
+django-hlsfield==1.0.4
 certifi>=2023.7.22  # Certificate validation fixes

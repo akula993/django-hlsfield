@@ -1,4 +1,3 @@
-# src/hlsfield/helpers.py
 """
 🛠️ Вспомогательные функции для django-hlsfield
 
