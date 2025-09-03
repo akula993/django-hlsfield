@@ -1,0 +1,9 @@
+include README.md
+include LICENSE
+include CHANGELOG.md
+include pyproject.toml
+recursive-include src/hlsfield/templates *
+recursive-include src/hlsfield/static *
+recursive-exclude tests *
+recursive-exclude examples *
+prune docs

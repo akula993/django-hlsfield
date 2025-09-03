@@ -30,7 +30,7 @@ GitHub: https://github.com/akula993/django-hlsfield
 """
 
 # Версия пакета (семантическое версионирование)
-__version__ = "1.0.4"
+__version__ = "1.0.5"
 
 # Метаданные пакета
 __title__ = "django-hlsfield"
@@ -324,6 +324,9 @@ classifiers = [
     'Topic :: Multimedia :: Video',
     'Topic :: Multimedia :: Video :: Conversion',
     'Topic :: Software Development :: Libraries :: Python Modules',
+    "Environment :: Web Environment",
+    "Natural Language :: English",
+    "Natural Language :: Russian",
 ]
 
 # Ключевые слова для поиска
