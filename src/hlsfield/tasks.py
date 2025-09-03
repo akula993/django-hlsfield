@@ -28,7 +28,7 @@ except ImportError:
     # Заглушки для работы без Celery
     def shared_task(*args, **kwargs):
         def decorator(func):
-            func.delay = lambda *a, **kw: func(*a, **kw)
+            func.delay = lambda *args, **kwargs: func(*args, **kwargs)
             return func
 
         return decorator

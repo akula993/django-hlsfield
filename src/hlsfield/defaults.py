@@ -15,10 +15,9 @@
 Лицензия: MIT
 """
 
+import logging
 import os
 import uuid
-import logging
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -29,17 +28,22 @@ logger = logging.getLogger(__name__)
 
 def _get_django_settings():
     """Безопасно получает объект Django settings"""
+    from django.core.exceptions import ImproperlyConfigured
     try:
-        from django.conf import settings as django_settings
-        from django.core.exceptions import ImproperlyConfigured
-        configured = getattr(django_settings, "configured", False)
-        if not configured:
+        import django
+        if not hasattr(django, 'apps') or not django.apps.apps.ready:
             return None
 
-        # Пробуем обратиться к настройкам
-        django_settings.DEBUG  # Это вызовет ImproperlyConfigured если не настроено
+        from django.conf import settings as django_settings
+
+        # Проверяем, настроены ли настройки
+        if not hasattr(django_settings, 'configured') or not django_settings.configured:
+            return None
+
+        # Пробуем обратиться к простой настройке
+        getattr(django_settings, 'DEBUG', False)
         return django_settings
-    except (ImportError, ImproperlyConfigured):
+    except (ImportError, ImproperlyConfigured, AttributeError):
         # Django не установлен
         return None
     except Exception:
@@ -443,7 +447,6 @@ def get_runtime_info() -> dict:
     """
     import shutil
     import sys
-    from pathlib import Path
 
     # Проверяем доступность FFmpeg
     ffmpeg_available = shutil.which(FFMPEG) is not None

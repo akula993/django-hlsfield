@@ -248,7 +248,8 @@ def check_django_version():
         import django
         from packaging import version
 
-        django_version = version.parse("{}.{}".format(*django.VERSION[:2]))
+        django_version_str = "{}.{}".format(*django.VERSION[:2])
+        django_version = version.parse(django_version_str)
         min_version = version.parse("4.2")
 
         if django_version < min_version:
