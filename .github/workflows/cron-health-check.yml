@@ -21,6 +21,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y ffmpeg
+        pip install celery
         pip install -e ".[dev]"
 
     - name: Test PyPI installation
@@ -29,7 +30,7 @@ jobs:
         if pip index versions django-hlsfield >/dev/null 2>&1; then
           echo "Package found on PyPI, installing..."
           pip uninstall django-hlsfield -y
-          pip install django-hlsfield celery
+          pip install django-hlsfield
           python -c "import hlsfield; print('✅ PyPI installation works'); print(f'Version: {hlsfield.__version__}')"
         else
           echo "📦 django-hlsfield not yet published on PyPI"
