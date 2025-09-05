@@ -1,6 +1,7 @@
+from django.contrib import admin
 from django.urls import path, include
 
 urlpatterns = [
-    path('admin/', include('django.contrib.admin.urls')),
+    path('admin/', admin.site.urls),  # ИСПРАВЛЕНО
     path('hlsfield/', include('hlsfield.urls')),
 ]

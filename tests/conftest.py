@@ -52,7 +52,6 @@ def temp_video_file():
     except:
         pass
 
-
 @pytest.fixture
 def mock_ffmpeg(monkeypatch):
     """Мокает FFmpeg команды"""
@@ -60,7 +59,7 @@ def mock_ffmpeg(monkeypatch):
 
     def mock_run(cmd, *args, **kwargs):
         # Эмулируем разные команды
-        if 'ffprobe' in cmd[0]:
+        if len(cmd) > 0 and 'ffprobe' in cmd[0]:
             output = '''{
                 "streams": [
                     {
@@ -79,19 +78,26 @@ def mock_ffmpeg(monkeypatch):
             }'''
             return CompletedProcess(args=cmd, returncode=0, stdout=output, stderr='')
 
-        # Для echo, sleep и других команд
-        if 'echo' in cmd:
+        # Для echo команд
+        if len(cmd) > 0 and 'echo' in cmd[0]:
             return CompletedProcess(args=cmd, returncode=0, stdout='hello', stderr='')
+
+        # Для sleep команд - эмулируем таймаут
+        if len(cmd) > 0 and 'sleep' in str(cmd):
+            import subprocess
+            raise subprocess.TimeoutExpired(' '.join(cmd), 1)
 
         # По умолчанию успех
         return CompletedProcess(args=cmd, returncode=0, stdout='', stderr='')
 
     def mock_ensure_binary(binary_name, path):
+        # Для несуществующих команд
+        if 'nonexistent' in path:
+            raise FileNotFoundError(f"Command not found: {path}")
         return path  # Всегда возвращаем путь как есть
 
     monkeypatch.setattr('hlsfield.utils.run', mock_run)
     monkeypatch.setattr('hlsfield.utils.ensure_binary_available', mock_ensure_binary)
-
 @pytest.fixture
 def temp_storage():
     """Создает временное хранилище для тестов"""

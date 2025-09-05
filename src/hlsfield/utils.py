@@ -23,6 +23,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+from celery.exceptions import SecurityError
+
 from . import defaults
 from .exceptions import (
     FFmpegError,
@@ -78,6 +80,10 @@ def run(cmd: List[str], timeout_sec: Optional[int] = None) -> subprocess.Complet
     """Выполняет команду с обработкой ошибок и таймаутами"""
     if not cmd:
         raise ValueError("Command cannot be empty")
+
+    # Добавить проверку на безопасность команд
+    if any(dangerous in str(cmd) for dangerous in ['rm -rf', '>', '>>', '&', '|', ';']):
+        raise SecurityError("Potentially dangerous command detected")
 
     binary_path = ensure_binary_available(cmd[0], cmd[0])
     cmd[0] = binary_path

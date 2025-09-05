@@ -295,14 +295,15 @@ def combine_video_metadata(*metadata_dicts: Dict[str, Any]) -> Dict[str, Any]:
     Объединяет несколько словарей метаданных с приоритетом.
 
     Args:
-        *metadata_dicts: Словари метаданных (приоритет по порядку)
+        *metadata_dicts: Словари метаданных (приоритет по порядку - последний имеет приоритет)
 
     Returns:
         dict: Объединенные метаданные
     """
     combined = {}
 
-    for meta in reversed(metadata_dicts):  # Обратный порядок для правильного приоритета
+    # ИСПРАВЛЯЕМ порядок - НЕ reverse, чтобы последний имел приоритет
+    for meta in metadata_dicts:
         combined.update({k: v for k, v in meta.items() if v is not None})
 
     return combined
@@ -425,12 +426,9 @@ def format_bitrate(bps: int) -> str:
     if bps >= 1_000_000:
         return f"{bps / 1_000_000:.1f} Mbps"
     elif bps >= 1_000:
-        # Исправляем округление
+        # ИСПРАВЛЯЕМ округление
         kbps = bps / 1_000
-        if kbps.is_integer():
-            return f"{int(kbps)} Kbps"
-        else:
-            return f"{kbps:.1f} Kbps"
+        return f"{kbps:.1f} Kbps"  # Убираем проверку is_integer()
     else:
         return f"{bps} bps"
 
@@ -493,14 +491,20 @@ def ensure_directory_exists(path: Union[str, Path], storage=None) -> bool:
     try:
         # Для локального storage
         if hasattr(storage, "path"):
-            full_path = Path(storage.path(path_str))
-            full_path.mkdir(parents=True, exist_ok=True)
-            return True
+
+            try:
+                full_path = Path(storage.path(path_str))
+                full_path.mkdir(parents=True, exist_ok=True)
+                return True
+            except (OSError, NotImplementedError):
+                # Fallback для случаев когда storage.path() не работает
+                pass
 
         # Для облачных storage - пытаемся сохранить пустой файл для создания "папки"
         test_file = f"{path_str.rstrip('/')}/._directory_marker"
         if not storage.exists(test_file):
-            storage.save(test_file, File(open("/dev/null", "rb")))
+            from io import BytesIO
+            storage.save(test_file, BytesIO(b''))
 
         return True
 

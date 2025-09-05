@@ -431,6 +431,7 @@ class VideoField(models.FileField):
     def __init__(
         self,
         *args,
+        subtitles_field=None,
         # Поля модели для автозаполнения метаданных
         duration_field: str | None = None,
         width_field: str | None = None,
@@ -480,7 +481,7 @@ class VideoField(models.FileField):
 
         # Инициализируем родительский FileField
         super().__init__(*args, **kwargs)
-
+        self.subtitles_field = subtitles_field
         # Сохраняем параметры обработки
         self.duration_field = duration_field
         self.width_field = width_field
