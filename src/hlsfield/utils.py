@@ -22,13 +22,12 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
+# Замените строку 26 в utils.py:
 try:
     from celery.exceptions import SecurityError
 except ImportError:
-    # Fallback for when celery is not installed
     class SecurityError(Exception):
         pass
-
 from . import defaults
 from .exceptions import (
     FFmpegError,
