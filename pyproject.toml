@@ -106,23 +106,13 @@ include = [
 [tool.hatch.build.targets.sdist]
 include = [
     "src/",
-    "tests/",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
     "pyproject.toml",
     "requirements/",
     "docs/",
-    "examples/",
 ]
-#[tool.hatch.build.targets.sdist]
-#include = [
-#    "src/",
-#    "README.md",
-#    "LICENSE",
-#    "pyproject.toml",
-#]
-
 
 # =============================================================================
 # DEVELOPMENT TOOLS CONFIGURATION

@@ -18,19 +18,13 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-from django.apps import apps
 from django.conf import settings
 from django.core.cache import cache
-from django.db.models import F
-from django.db.models.signals import (
-    post_migrate, post_save, post_delete,
-    pre_save, pre_delete, m2m_changed
-)
+from django.db.models.signals import post_migrate, post_save, post_delete, pre_save, pre_delete
 from django.dispatch import receiver
 from django.utils import timezone
 
 from .apps import HLSFieldConfig
-from .exceptions import StorageError
 from .helpers import get_model_video_fields
 
 logger = logging.getLogger(__name__)
@@ -40,6 +34,7 @@ logger = logging.getLogger(__name__)
 # СИГНАЛЫ МИГРАЦИЙ И ИНИЦИАЛИЗАЦИИ
 # ==============================================================================
 
+
 @receiver(post_migrate, sender=HLSFieldConfig)
 def create_media_directories(sender, **kwargs):
     """
@@ -48,7 +43,7 @@ def create_media_directories(sender, **kwargs):
     Создает базовую структуру папок для видео файлов,
     превью, HLS и DASH контента.
     """
-    if not hasattr(settings, 'MEDIA_ROOT') or not settings.MEDIA_ROOT:
+    if not hasattr(settings, "MEDIA_ROOT") or not settings.MEDIA_ROOT:
         logger.debug("MEDIA_ROOT not configured, skipping directory creation")
         return
 
@@ -56,16 +51,16 @@ def create_media_directories(sender, **kwargs):
 
     # Базовые директории для видео
     directories = [
-        media_root / 'videos',
-        media_root / 'videos' / 'hls',
-        media_root / 'videos' / 'dash',
-        media_root / 'videos' / 'adaptive',
-        media_root / 'videos' / 'previews',
-        media_root / 'videos' / 'temp',  # Для временных файлов
+        media_root / "videos",
+        media_root / "videos" / "hls",
+        media_root / "videos" / "dash",
+        media_root / "videos" / "adaptive",
+        media_root / "videos" / "previews",
+        media_root / "videos" / "temp",  # Для временных файлов
     ]
 
     # Дополнительные директории из настроек
-    extra_dirs = getattr(settings, 'HLSFIELD_EXTRA_DIRECTORIES', [])
+    extra_dirs = getattr(settings, "HLSFIELD_EXTRA_DIRECTORIES", [])
     for extra_dir in extra_dirs:
         directories.append(media_root / extra_dir)
 
@@ -101,16 +96,16 @@ def cleanup_old_migrations_cache(sender, **kwargs):
 
     # Очищаем кеш настроек
     cache_keys = [
-        'hlsfield_settings_validated',
-        'ffmpeg_availability_checked',
-        'video_analytics_*',
+        "hlsfield_settings_validated",
+        "ffmpeg_availability_checked",
+        "video_analytics_*",
     ]
 
     for pattern in cache_keys:
-        if '*' in pattern:
+        if "*" in pattern:
             # Очищаем по паттерну (если поддерживается)
             try:
-                cache.delete_many(cache.keys(pattern.replace('*', '*')))
+                cache.delete_many(cache.keys(pattern.replace("*", "*")))
             except (AttributeError, NotImplementedError):
                 pass
         else:
@@ -122,6 +117,7 @@ def cleanup_old_migrations_cache(sender, **kwargs):
 # ==============================================================================
 # СИГНАЛЫ ЖИЗНЕННОГО ЦИКЛА ВИДЕО ОБЪЕКТОВ
 # ==============================================================================
+
 
 @receiver(pre_save)
 def video_field_pre_save_handler(sender, instance, **kwargs):
@@ -146,17 +142,22 @@ def video_field_pre_save_handler(sender, instance, **kwargs):
             continue
 
         # Устанавливаем начальный статус обработки
-        if hasattr(instance, 'processing_status') and not getattr(instance, 'processing_status', None):
-            setattr(instance, 'processing_status', 'pending')
+        if hasattr(instance, "processing_status") and not getattr(
+            instance, "processing_status", None
+        ):
+            setattr(instance, "processing_status", "pending")
 
         # Устанавливаем время загрузки
-        if hasattr(instance, 'video_uploaded_at') and not getattr(instance, 'video_uploaded_at', None):
-            setattr(instance, 'video_uploaded_at', timezone.now())
+        if hasattr(instance, "video_uploaded_at") and not getattr(
+            instance, "video_uploaded_at", None
+        ):
+            setattr(instance, "video_uploaded_at", timezone.now())
 
         # Генерируем уникальный ID если нужно
-        if hasattr(instance, 'video_id') and not getattr(instance, 'video_id', None):
+        if hasattr(instance, "video_id") and not getattr(instance, "video_id", None):
             from .helpers import generate_video_id
-            setattr(instance, 'video_id', generate_video_id())
+
+            setattr(instance, "video_id", generate_video_id())
 
 
 @receiver(post_save)
@@ -186,7 +187,9 @@ def video_field_post_save_handler(sender, instance, created, **kwargs):
 
         # Создаем запись в аналитике если включена
         if _is_analytics_enabled():
-            _create_video_analytics_record(instance, field_name, 'uploaded' if created else 'updated')
+            _create_video_analytics_record(
+                instance, field_name, "uploaded" if created else "updated"
+            )
 
         # Отправляем уведомление о загрузке
         if created and _should_send_notifications():
@@ -215,16 +218,16 @@ def video_field_pre_delete_handler(sender, instance, **kwargs):
 
         if field_file and field_file.name:
             video_info[field_name] = {
-                'name': field_file.name,
-                'size': _get_file_size_safe(field_file),
-                'url': _get_file_url_safe(field_file),
+                "name": field_file.name,
+                "size": _get_file_size_safe(field_file),
+                "url": _get_file_url_safe(field_file),
             }
 
             # Добавляем связанные файлы (HLS, DASH, превью)
-            video_info[field_name]['related_files'] = _get_related_files(instance, field_name)
+            video_info[field_name]["related_files"] = _get_related_files(instance, field_name)
 
     # Сохраняем во временном атрибуте для post_delete
-    setattr(instance, '_hlsfield_deletion_info', video_info)
+    setattr(instance, "_hlsfield_deletion_info", video_info)
 
 
 @receiver(post_delete)
@@ -238,7 +241,7 @@ def video_field_post_delete_handler(sender, instance, **kwargs):
     """
 
     # Получаем сохраненную информацию
-    deletion_info = getattr(instance, '_hlsfield_deletion_info', {})
+    deletion_info = getattr(instance, "_hlsfield_deletion_info", {})
 
     if not deletion_info:
         return
@@ -249,12 +252,12 @@ def video_field_post_delete_handler(sender, instance, **kwargs):
     for field_name, file_info in deletion_info.items():
         try:
             # Удаляем основной файл
-            main_file = file_info['name']
+            main_file = file_info["name"]
             if main_file and _delete_file_safe(main_file):
                 deleted_files.append(main_file)
 
             # Удаляем связанные файлы
-            related_files = file_info.get('related_files', [])
+            related_files = file_info.get("related_files", [])
             for related_file in related_files:
                 if _delete_file_safe(related_file):
                     deleted_files.append(related_file)
@@ -262,7 +265,9 @@ def video_field_post_delete_handler(sender, instance, **kwargs):
                     failed_deletions.append(related_file)
 
         except Exception as e:
-            logger.error(f"Error deleting files for {sender.__name__}:{instance.pk}.{field_name}: {e}")
+            logger.error(
+                f"Error deleting files for {sender.__name__}:{instance.pk}.{field_name}: {e}"
+            )
             failed_deletions.append(f"{field_name}: {e}")
 
     # Логируем результаты
@@ -277,12 +282,13 @@ def video_field_post_delete_handler(sender, instance, **kwargs):
 
     # Аналитика удаления
     if _is_analytics_enabled():
-        _create_video_analytics_record(instance, None, 'deleted', extra_data=deletion_info)
+        _create_video_analytics_record(instance, None, "deleted", extra_data=deletion_info)
 
 
 # ==============================================================================
 # СИГНАЛЫ ДЛЯ УВЕДОМЛЕНИЙ И ИНТЕГРАЦИЙ
 # ==============================================================================
+
 
 @receiver(post_save)
 def video_processing_status_changed(sender, instance, created, **kwargs):
@@ -292,7 +298,7 @@ def video_processing_status_changed(sender, instance, created, **kwargs):
     Отправляет уведомления когда видео готово к просмотру.
     """
 
-    if not hasattr(instance, 'processing_status'):
+    if not hasattr(instance, "processing_status"):
         return
 
     # Проверяем изменился ли статус на "готово"
@@ -300,11 +306,16 @@ def video_processing_status_changed(sender, instance, created, **kwargs):
         try:
             # Получаем предыдущую версию из БД
             old_instance = sender.objects.get(pk=instance.pk)
-            old_status = getattr(old_instance, 'processing_status', None)
-            new_status = getattr(instance, 'processing_status', None)
+            old_status = getattr(old_instance, "processing_status", None)
+            new_status = getattr(instance, "processing_status", None)
 
             # Если статус изменился на готовность
-            if old_status != new_status and new_status in ['ready', 'hls_ready', 'dash_ready', 'adaptive_ready']:
+            if old_status != new_status and new_status in [
+                "ready",
+                "hls_ready",
+                "dash_ready",
+                "adaptive_ready",
+            ]:
                 _handle_video_ready_notification(instance, new_status)
 
         except sender.DoesNotExist:
@@ -337,6 +348,7 @@ def update_video_statistics(sender, instance, created, **kwargs):
 # ИНТЕГРАЦИОННЫЕ СИГНАЛЫ
 # ==============================================================================
 
+
 @receiver(post_save)
 def integrate_with_search_engines(sender, instance, created, **kwargs):
     """
@@ -358,7 +370,7 @@ def integrate_with_search_engines(sender, instance, created, **kwargs):
         search_data = _prepare_search_data(instance, video_fields)
 
         if search_data:
-            _send_to_search_engine(search_data, action='index' if created else 'update')
+            _send_to_search_engine(search_data, action="index" if created else "update")
 
     except Exception as e:
         logger.warning(f"Search engine integration failed: {e}")
@@ -375,7 +387,7 @@ def remove_from_search_engines(sender, instance, **kwargs):
 
     if video_fields:
         try:
-            _send_to_search_engine({'id': instance.pk}, action='delete')
+            _send_to_search_engine({"id": instance.pk}, action="delete")
         except Exception as e:
             logger.warning(f"Search engine removal failed: {e}")
 
@@ -416,6 +428,7 @@ def trigger_cdn_purge(sender, instance, created, **kwargs):
 # ==============================================================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==============================================================================
+
 
 def _increment_video_counter(model_name: str):
     """Увеличивает счетчик видео для модели"""
@@ -462,7 +475,7 @@ def _get_related_files(instance, field_name: str) -> List[str]:
     field = instance._meta.get_field(field_name)
 
     # HLS плейлист
-    hls_field = getattr(field, 'hls_playlist_field', None)
+    hls_field = getattr(field, "hls_playlist_field", None)
     if hls_field:
         hls_path = getattr(instance, hls_field, None)
         if hls_path:
@@ -471,7 +484,7 @@ def _get_related_files(instance, field_name: str) -> List[str]:
             related_files.extend(_get_hls_segments(hls_path))
 
     # DASH манифест
-    dash_field = getattr(field, 'dash_manifest_field', None)
+    dash_field = getattr(field, "dash_manifest_field", None)
     if dash_field:
         dash_path = getattr(instance, dash_field, None)
         if dash_path:
@@ -480,7 +493,7 @@ def _get_related_files(instance, field_name: str) -> List[str]:
             related_files.extend(_get_dash_segments(dash_path))
 
     # Превью
-    preview_field = getattr(field, 'preview_field', None)
+    preview_field = getattr(field, "preview_field", None)
     if preview_field:
         preview_path = getattr(instance, preview_field, None)
         if preview_path:
@@ -498,7 +511,7 @@ def _get_hls_segments(playlist_path: str) -> List[str]:
         base_dir = str(Path(playlist_path).parent)
 
         # Добавляем типичные варианты качества
-        for quality in ['v240', 'v360', 'v480', 'v720', 'v1080']:
+        for quality in ["v240", "v360", "v480", "v720", "v1080"]:
             segments.append(f"{base_dir}/{quality}/index.m3u8")
 
             # Сегменты (примерно 5-20 файлов)
@@ -548,35 +561,37 @@ def _delete_file_safe(file_path: str) -> bool:
 
 def _is_analytics_enabled() -> bool:
     """Проверяет включена ли аналитика"""
-    return getattr(settings, 'HLSFIELD_ENABLE_ANALYTICS', False)
+    return getattr(settings, "HLSFIELD_ENABLE_ANALYTICS", False)
 
 
 def _should_send_notifications() -> bool:
     """Проверяет нужно ли отправлять уведомления"""
-    return getattr(settings, 'HLSFIELD_SEND_NOTIFICATIONS', False)
+    return getattr(settings, "HLSFIELD_SEND_NOTIFICATIONS", False)
 
 
 def _is_search_integration_enabled() -> bool:
     """Проверяет включена ли интеграция с поиском"""
-    return getattr(settings, 'HLSFIELD_SEARCH_INTEGRATION', False)
+    return getattr(settings, "HLSFIELD_SEARCH_INTEGRATION", False)
 
 
 def _is_cdn_integration_enabled() -> bool:
     """Проверяет включена ли интеграция с CDN"""
-    return getattr(settings, 'HLSFIELD_CDN_INTEGRATION', False)
+    return getattr(settings, "HLSFIELD_CDN_INTEGRATION", False)
 
 
-def _create_video_analytics_record(instance, field_name: Optional[str], action: str, extra_data: dict = None):
+def _create_video_analytics_record(
+    instance, field_name: Optional[str], action: str, extra_data: dict = None
+):
     """Создает запись в аналитике"""
     try:
         from .views import VideoEvent
 
         VideoEvent.objects.create(
             video_id=str(instance.pk),
-            session_id='system',
+            session_id="system",
             event_type=action,
             timestamp=timezone.now(),
-            additional_data=extra_data or {}
+            additional_data=extra_data or {},
         )
     except Exception as e:
         logger.debug(f"Could not create analytics record: {e}")
@@ -587,11 +602,11 @@ def _send_video_upload_notification(instance, field_name: str):
     try:
         # Пример интеграции с Django channels или email
         notification_data = {
-            'type': 'video_uploaded',
-            'instance_id': instance.pk,
-            'model': instance._meta.label,
-            'field_name': field_name,
-            'timestamp': timezone.now().isoformat(),
+            "type": "video_uploaded",
+            "instance_id": instance.pk,
+            "model": instance._meta.label,
+            "field_name": field_name,
+            "timestamp": timezone.now().isoformat(),
         }
 
         # Здесь можно добавить отправку в Slack, Discord, email и т.д.
@@ -605,7 +620,7 @@ def _handle_video_ready_notification(instance, status: str):
     """Обрабатывает уведомления о готовности видео"""
     try:
         # Можно отправить email пользователю
-        if hasattr(instance, 'user') and instance.user:
+        if hasattr(instance, "user") and instance.user:
             _send_video_ready_email(instance.user, instance, status)
 
         # Уведомление в админку
@@ -622,11 +637,14 @@ def _send_video_ready_email(user, instance, status: str):
         from django.template.loader import render_to_string
 
         subject = f"Your video is ready!"
-        message = render_to_string('hlsfield/emails/video_ready.html', {
-            'user': user,
-            'instance': instance,
-            'status': status,
-        })
+        message = render_to_string(
+            "hlsfield/emails/video_ready.html",
+            {
+                "user": user,
+                "instance": instance,
+                "status": status,
+            },
+        )
 
         send_mail(
             subject=subject,
@@ -644,6 +662,7 @@ def _send_admin_notification(message: str):
     """Отправляет уведомление администраторам"""
     try:
         from django.core.mail import mail_admins
+
         mail_admins(
             subject="HLSField Notification",
             message=message,
@@ -658,21 +677,24 @@ def _update_app_statistics(sender, instance, created: bool):
     stats_key = "hlsfield_app_stats"
 
     try:
-        stats = cache.get(stats_key, {
-            'total_videos': 0,
-            'total_processed': 0,
-            'last_update': time.time(),
-        })
+        stats = cache.get(
+            stats_key,
+            {
+                "total_videos": 0,
+                "total_processed": 0,
+                "last_update": time.time(),
+            },
+        )
 
         if created:
-            stats['total_videos'] += 1
+            stats["total_videos"] += 1
 
-        if hasattr(instance, 'processing_status'):
-            status = getattr(instance, 'processing_status')
-            if status in ['ready', 'hls_ready', 'dash_ready', 'adaptive_ready']:
-                stats['total_processed'] += 1
+        if hasattr(instance, "processing_status"):
+            status = getattr(instance, "processing_status")
+            if status in ["ready", "hls_ready", "dash_ready", "adaptive_ready"]:
+                stats["total_processed"] += 1
 
-        stats['last_update'] = time.time()
+        stats["last_update"] = time.time()
         cache.set(stats_key, stats, 86400)  # 24 часа
 
     except Exception:
@@ -682,13 +704,13 @@ def _update_app_statistics(sender, instance, created: bool):
 def _prepare_search_data(instance, video_fields: List[str]) -> dict:
     """Подготавливает данные для поисковых систем"""
     search_data = {
-        'id': instance.pk,
-        'model': instance._meta.label,
-        'timestamp': timezone.now().isoformat(),
+        "id": instance.pk,
+        "model": instance._meta.label,
+        "timestamp": timezone.now().isoformat(),
     }
 
     # Добавляем основную информацию
-    for field in ['title', 'description', 'tags']:
+    for field in ["title", "description", "tags"]:
         if hasattr(instance, field):
             search_data[field] = getattr(instance, field)
 
@@ -696,8 +718,9 @@ def _prepare_search_data(instance, video_fields: List[str]) -> dict:
     for field_name in video_fields:
         try:
             from .helpers import get_video_field_metadata
+
             metadata = get_video_field_metadata(instance, field_name)
-            search_data[f'{field_name}_metadata'] = metadata
+            search_data[f"{field_name}_metadata"] = metadata
         except Exception:
             pass
 
@@ -716,10 +739,11 @@ def _get_cdn_urls_for_purge(instance, field_name: str) -> List[str]:
 
     try:
         from .helpers import get_video_field_metadata
+
         metadata = get_video_field_metadata(instance, field_name)
 
         # Добавляем основные URL
-        for url_key in ['url', 'hls_url', 'dash_url', 'preview_url']:
+        for url_key in ["url", "hls_url", "dash_url", "preview_url"]:
             if url_key in metadata:
                 urls.append(metadata[url_key])
 
@@ -740,7 +764,7 @@ def _purge_cdn_cache(urls: List[str]):
 # ==============================================================================
 
 # Дополнительные сигналы можно активировать через настройки
-if getattr(settings, 'HLSFIELD_ENABLE_WEBHOOKS', False):
+if getattr(settings, "HLSFIELD_ENABLE_WEBHOOKS", False):
 
     @receiver(post_save)
     def send_webhooks(sender, instance, created, **kwargs):
@@ -748,16 +772,16 @@ if getattr(settings, 'HLSFIELD_ENABLE_WEBHOOKS', False):
         video_fields = get_model_video_fields(sender)
 
         if video_fields:
-            webhook_url = getattr(settings, 'HLSFIELD_WEBHOOK_URL', None)
+            webhook_url = getattr(settings, "HLSFIELD_WEBHOOK_URL", None)
             if webhook_url:
                 try:
                     import requests
 
                     payload = {
-                        'action': 'created' if created else 'updated',
-                        'model': sender.__name__,
-                        'instance_id': instance.pk,
-                        'timestamp': timezone.now().isoformat(),
+                        "action": "created" if created else "updated",
+                        "model": sender.__name__,
+                        "instance_id": instance.pk,
+                        "timestamp": timezone.now().isoformat(),
                     }
 
                     requests.post(webhook_url, json=payload, timeout=5)
@@ -769,6 +793,7 @@ if getattr(settings, 'HLSFIELD_ENABLE_WEBHOOKS', False):
 # ==============================================================================
 # СИГНАЛ ДЛЯ ОЧИСТКИ КЕША
 # ==============================================================================
+
 
 @receiver([post_save, post_delete])
 def invalidate_related_caches(sender, instance, **kwargs):

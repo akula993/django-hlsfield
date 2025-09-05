@@ -1,9 +1,8 @@
-import pytest
-from django.test import TestCase
-from django.db import models
-from django.core.files.base import ContentFile
-from pathlib import Path
 import tempfile
+
+import pytest
+from django.db import models
+from django.test import TestCase
 
 from hlsfield import (
     VideoField,
@@ -41,6 +40,7 @@ class TestHLSModel(models.Model):
         db_table = 'test_hls_model'
 
 
+@pytest.mark.django_db
 class TestVideoFieldBasics(TestCase):
     """Базовые тесты VideoField"""
 
@@ -68,6 +68,7 @@ class TestVideoFieldBasics(TestCase):
         assert field.upload_to is not None
 
 
+@pytest.mark.django_db
 class TestHLSVideoField(TestCase):
     """Тесты HLSVideoField"""
 
@@ -93,6 +94,7 @@ class TestHLSVideoField(TestCase):
         assert field.segment_duration == 10
 
 
+@pytest.mark.django_db
 class TestDASHVideoField(TestCase):
     """Тесты DASHVideoField"""
 
@@ -112,6 +114,7 @@ class TestDASHVideoField(TestCase):
         assert field.segment_duration == 4
 
 
+@pytest.mark.django_db
 class TestAdaptiveVideoField(TestCase):
     """Тесты AdaptiveVideoField"""
 
@@ -193,6 +196,7 @@ class TestOptimalLadder(TestCase):
         assert all(rung['height'] <= 360 * 1.5 for rung in ladder)
 
 
+@pytest.mark.django_db
 class TestFieldDeconstruct(TestCase):
     """Тесты декомпозиции полей для миграций"""
 
@@ -218,6 +222,7 @@ class TestFieldDeconstruct(TestCase):
         assert kwargs['segment_duration'] == 8
 
 
+@pytest.mark.django_db
 class TestFieldFileObjects(TestCase):
     """Тесты файловых объектов полей"""
 
@@ -251,6 +256,7 @@ import shutil
 
 
 @pytest.mark.skipif(not shutil.which('ffmpeg'), reason="FFmpeg not available")
+@pytest.mark.django_db
 class TestFFmpegIntegration(TestCase):
     """Интеграционные тесты с FFmpeg"""
 

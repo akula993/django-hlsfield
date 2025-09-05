@@ -17,7 +17,15 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any
+
+from django.apps import apps
+from django.core.cache import cache
+from django.db import transaction, models
+from django.utils import timezone
+
+from . import utils, defaults
+from .exceptions import TranscodingError, StorageError
 
 try:
     from celery import shared_task, group, chain
@@ -33,33 +41,7 @@ except ImportError:
 
         return decorator
 
-
-    def group(*args):
-        return None
-
-
-    def chain(*args):
-        return None
-
-
-    class Retry(Exception):
-        pass
-
-
     CELERY_AVAILABLE = False
-
-from django.apps import apps
-from django.db import transaction
-from django.utils import timezone
-from django.core.cache import cache
-
-from . import utils, defaults
-from .exceptions import (
-    TranscodingError,
-    FFmpegError,
-    InvalidVideoError,
-    StorageError
-)
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +49,7 @@ logger = logging.getLogger(__name__)
 # ==============================================================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==============================================================================
+
 
 def _resolve_field(instance, field_name: str):
     """Получает информацию о поле и связанных объектах"""
@@ -89,9 +72,9 @@ def _update_instance_status(instance, status: str, **extra_fields):
         update_fields = []
 
         # Статус обработки
-        if hasattr(instance, 'processing_status'):
-            setattr(instance, 'processing_status', status)
-            update_fields.append('processing_status')
+        if hasattr(instance, "processing_status"):
+            setattr(instance, "processing_status", status)
+            update_fields.append("processing_status")
 
         # Дополнительные поля
         for field_name, value in extra_fields.items():
@@ -112,19 +95,16 @@ def _handle_task_error(instance, error: Exception, task_name: str):
     error_msg = f"{task_name} failed: {str(error)[:100]}"
     logger.error(f"Task {task_name} failed for {instance}: {error}")
 
-    _update_instance_status(
-        instance,
-        f"error_{task_name}",
-        error_message=error_msg
-    )
+    _update_instance_status(instance, f"error_{task_name}", error_message=error_msg)
 
     # Отправляем уведомление если настроено
     try:
         from django.core.mail import mail_admins
+
         mail_admins(
             f"Video processing error: {task_name}",
             f"Error processing {instance}: {error}",
-            fail_silently=True
+            fail_silently=True,
         )
     except:
         pass
@@ -133,6 +113,7 @@ def _handle_task_error(instance, error: Exception, task_name: str):
 # ==============================================================================
 # ОСНОВНЫЕ ЗАДАЧИ ТРАНСКОДИНГА
 # ==============================================================================
+
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def build_hls_for_field(self, model_label: str, pk: int | str, field_name: str):
@@ -213,17 +194,14 @@ def build_hls_for_field_sync(model_label: str, pk: int | str, field_name: str):
         logger.info(f"HLS transcoding completed in {elapsed:.1f}s")
 
         _update_instance_status(
-            instance,
-            "hls_ready",
-            transcoding_time=int(elapsed),
-            **update_fields
+            instance, "hls_ready", transcoding_time=int(elapsed), **update_fields
         )
 
         return {
             "status": "success",
             "master_playlist": master_key,
             "transcoding_time": elapsed,
-            "variants": len(ladder)
+            "variants": len(ladder),
         }
 
     except Exception as e:
@@ -301,17 +279,14 @@ def build_dash_for_field_sync(model_label: str, pk: int | str, field_name: str):
         logger.info(f"DASH transcoding completed in {elapsed:.1f}s")
 
         _update_instance_status(
-            instance,
-            "dash_ready",
-            transcoding_time=int(elapsed),
-            **update_fields
+            instance, "dash_ready", transcoding_time=int(elapsed), **update_fields
         )
 
         return {
             "status": "success",
             "manifest": manifest_key,
             "transcoding_time": elapsed,
-            "representations": len(ladder)
+            "representations": len(ladder),
         }
 
     except Exception as e:
@@ -395,10 +370,7 @@ def build_adaptive_for_field_sync(model_label: str, pk: int | str, field_name: s
         logger.info(f"Adaptive transcoding completed in {elapsed:.1f}s")
 
         _update_instance_status(
-            instance,
-            "adaptive_ready",
-            transcoding_time=int(elapsed),
-            **update_fields
+            instance, "adaptive_ready", transcoding_time=int(elapsed), **update_fields
         )
 
         return {
@@ -406,7 +378,7 @@ def build_adaptive_for_field_sync(model_label: str, pk: int | str, field_name: s
             "hls_master": hls_master_key,
             "dash_manifest": dash_manifest_key,
             "transcoding_time": elapsed,
-            "variants": len(ladder)
+            "variants": len(ladder),
         }
 
     except Exception as e:
@@ -418,15 +390,18 @@ def build_adaptive_for_field_sync(model_label: str, pk: int | str, field_name: s
 # ПРОГРЕССИВНЫЕ ЗАДАЧИ
 # ==============================================================================
 
+
 @shared_task
-def build_progressive_for_field(model_label: str, pk: int | str, field_name: str,
-                                options: Dict[str, Any]):
+def build_progressive_for_field(
+    model_label: str, pk: int | str, field_name: str, options: Dict[str, Any]
+):
     """Прогрессивное создание адаптивного видео"""
     return build_progressive_for_field_sync(model_label, pk, field_name, options)
 
 
-def build_progressive_for_field_sync(model_label: str, pk: int | str, field_name: str,
-                                     options: Dict[str, Any]):
+def build_progressive_for_field_sync(
+    model_label: str, pk: int | str, field_name: str, options: Dict[str, Any]
+):
     """Синхронная версия прогрессивной обработки"""
     logger.info(f"Starting progressive transcoding for {model_label}:{pk}")
 
@@ -434,18 +409,19 @@ def build_progressive_for_field_sync(model_label: str, pk: int | str, field_name
     instance = Model.objects.get(pk=pk)
     field, file, storage, name = _resolve_field(instance, field_name)
 
-    preview_first = options.get('preview_first', True)
-    progressive_delay = options.get('progressive_delay', 60)
-    priority_heights = options.get('priority_heights', [360, 720])
+    preview_first = options.get("preview_first", True)
+    progressive_delay = options.get("progressive_delay", 60)
+    priority_heights = options.get("priority_heights", [360, 720])
 
-    ladder = getattr(field, 'ladder', defaults.DEFAULT_LADDER)
+    ladder = getattr(field, "ladder", defaults.DEFAULT_LADDER)
 
     # Сортируем лестницу: приоритетные сначала
-    priority_ladder = [r for r in ladder if r['height'] in priority_heights]
-    regular_ladder = [r for r in ladder if r['height'] not in priority_heights]
+    priority_ladder = [r for r in ladder if r["height"] in priority_heights]
+    regular_ladder = [r for r in ladder if r["height"] not in priority_heights]
 
-    ordered_ladder = (sorted(priority_ladder, key=lambda x: x['height']) +
-                      sorted(regular_ladder, key=lambda x: x['height']))
+    ordered_ladder = sorted(priority_ladder, key=lambda x: x["height"]) + sorted(
+        regular_ladder, key=lambda x: x["height"]
+    )
 
     try:
         with utils.tempdir(prefix=f"progressive_{pk}_") as td:
@@ -457,8 +433,7 @@ def build_progressive_for_field_sync(model_label: str, pk: int | str, field_name
                 logger.info(f"Creating preview quality: {preview_quality['height']}p")
 
                 _build_single_quality(
-                    local_input, storage, name, [preview_quality],
-                    field, instance, is_preview=True
+                    local_input, storage, name, [preview_quality], field, instance, is_preview=True
                 )
 
                 remaining_ladder = ordered_ladder[1:]
@@ -471,12 +446,13 @@ def build_progressive_for_field_sync(model_label: str, pk: int | str, field_name
                     logger.info(f"Waiting {progressive_delay}s before next quality...")
                     time.sleep(progressive_delay)
 
-                current_ladder = ordered_ladder[:len(ordered_ladder) - len(remaining_ladder) + i + 1]
+                current_ladder = ordered_ladder[
+                    : len(ordered_ladder) - len(remaining_ladder) + i + 1
+                ]
                 logger.info(f"Adding quality: {quality['height']}p ({len(current_ladder)} total)")
 
                 _build_single_quality(
-                    local_input, storage, name, current_ladder,
-                    field, instance, is_preview=False
+                    local_input, storage, name, current_ladder, field, instance, is_preview=False
                 )
 
         logger.info("Progressive transcoding completed")
@@ -487,16 +463,22 @@ def build_progressive_for_field_sync(model_label: str, pk: int | str, field_name
         raise
 
 
-def _build_single_quality(local_input: Path, storage, name: str,
-                          current_ladder: List[Dict], field, instance,
-                          is_preview: bool = False):
+def _build_single_quality(
+    local_input: Path,
+    storage,
+    name: str,
+    current_ladder: List[Dict],
+    field,
+    instance,
+    is_preview: bool = False,
+):
     """Создает текущую лестницу качеств и обновляет манифесты"""
 
     with utils.tempdir(prefix=f"quality_{len(current_ladder)}_") as td:
         adaptive_root = td / "adaptive_out"
         adaptive_root.mkdir(parents=True, exist_ok=True)
 
-        segment_duration = getattr(field, 'segment_duration', defaults.SEGMENT_DURATION)
+        segment_duration = getattr(field, "segment_duration", defaults.SEGMENT_DURATION)
 
         results = utils.transcode_adaptive_variants(
             input_path=local_input,
@@ -527,15 +509,12 @@ def _build_single_quality(local_input: Path, storage, name: str,
 
         # Статус
         if is_preview:
-            status = 'preview_ready'
+            status = "preview_ready"
         else:
-            status = f'ready_{len(current_ladder)}_qualities'
+            status = f"ready_{len(current_ladder)}_qualities"
 
         _update_instance_status(
-            instance,
-            status,
-            qualities_ready=len(current_ladder),
-            **update_fields
+            instance, status, qualities_ready=len(current_ladder), **update_fields
         )
 
 
@@ -543,9 +522,11 @@ def _build_single_quality(local_input: Path, storage, name: str,
 # BATCH ОПЕРАЦИИ
 # ==============================================================================
 
+
 @shared_task
-def batch_optimize_videos(model_label: str, pks: List[int], field_name: str,
-                          target_qualities: int = 3):
+def batch_optimize_videos(
+    model_label: str, pks: List[int], field_name: str, target_qualities: int = 3
+):
     """Массовая оптимизация видео"""
     logger.info(f"Starting batch optimization for {len(pks)} videos")
 
@@ -557,35 +538,30 @@ def batch_optimize_videos(model_label: str, pks: List[int], field_name: str,
             instance = Model.objects.get(pk=pk)
 
             # Запускаем оптимизацию
-            result = optimize_existing_video.delay(
-                model_label, pk, field_name, target_qualities
-            )
+            result = optimize_existing_video.delay(model_label, pk, field_name, target_qualities)
 
-            results.append({
-                "pk": pk,
-                "status": "queued",
-                "task_id": result.id
-            })
+            results.append({"pk": pk, "status": "queued", "task_id": result.id})
 
         except Exception as e:
             logger.error(f"Failed to queue optimization for {pk}: {e}")
-            results.append({
-                "pk": pk,
-                "status": "error",
-                "message": str(e)
-            })
+            results.append({"pk": pk, "status": "error", "message": str(e)})
 
     return {
         "total_processed": len(pks),
         "successful": len([r for r in results if r["status"] == "queued"]),
         "failed": len([r for r in results if r["status"] == "error"]),
-        "results": results
+        "results": results,
     }
 
 
 @shared_task
-def optimize_existing_video(model_label: str, pk: int | str, field_name: str,
-                            target_qualities: int = 5, max_file_size_mb: int = None):
+def optimize_existing_video(
+    model_label: str,
+    pk: int | str,
+    field_name: str,
+    target_qualities: int = 5,
+    max_file_size_mb: int = None,
+):
     """Оптимизирует существующее видео"""
     logger.info(f"Optimizing video {model_label}:{pk}")
 
@@ -602,12 +578,13 @@ def optimize_existing_video(model_label: str, pk: int | str, field_name: str,
 
             # Генерируем оптимальную лестницу
             from .fields import get_optimal_ladder_for_resolution
+
             info = utils.ffprobe_streams(local_input)
             video_stream, _ = utils.pick_video_audio_streams(info)
 
             if video_stream:
-                width = int(video_stream.get('width', 1920))
-                height = int(video_stream.get('height', 1080))
+                width = int(video_stream.get("width", 1920))
+                height = int(video_stream.get("height", 1080))
                 new_ladder = get_optimal_ladder_for_resolution(width, height)
 
                 # Ограничиваем количество качеств
@@ -628,7 +605,7 @@ def optimize_existing_video(model_label: str, pk: int | str, field_name: str,
                 return {
                     "status": "success",
                     "optimized_qualities": len(new_ladder),
-                    "estimated_size_reduction": "N/A"
+                    "estimated_size_reduction": "N/A",
                 }
 
     except Exception as e:
@@ -636,17 +613,18 @@ def optimize_existing_video(model_label: str, pk: int | str, field_name: str,
         raise
 
 
-def _adjust_ladder_for_size_limit(ladder: List[Dict], analysis: Dict,
-                                  max_size_mb: int) -> List[Dict]:
+def _adjust_ladder_for_size_limit(
+    ladder: List[Dict], analysis: Dict, max_size_mb: int
+) -> List[Dict]:
     """Корректирует битрейты под ограничение размера"""
-    duration = analysis.get('duration', 0)
+    duration = analysis.get("duration", 0)
     if duration <= 0:
         return ladder
 
     # Рассчитываем текущий размер
     total_size = 0
     for quality in ladder:
-        total_bitrate = (quality['v_bitrate'] + quality['a_bitrate']) * 1000
+        total_bitrate = (quality["v_bitrate"] + quality["a_bitrate"]) * 1000
         size_mb = (total_bitrate * duration) / (8 * 1024 * 1024)
         total_size += size_mb
 
@@ -659,8 +637,8 @@ def _adjust_ladder_for_size_limit(ladder: List[Dict], analysis: Dict,
     adjusted_ladder = []
     for quality in ladder:
         adjusted = quality.copy()
-        adjusted['v_bitrate'] = max(200, int(quality['v_bitrate'] * reduction_factor))
-        adjusted['a_bitrate'] = max(64, int(quality['a_bitrate'] * reduction_factor))
+        adjusted["v_bitrate"] = max(200, int(quality["v_bitrate"] * reduction_factor))
+        adjusted["a_bitrate"] = max(64, int(quality["a_bitrate"] * reduction_factor))
         adjusted_ladder.append(adjusted)
 
     return adjusted_ladder
@@ -718,13 +696,14 @@ def health_check_videos(model_label: str, field_name: str):
         "total_checked": checked_count,
         "issues_found": len(issues),
         "issues": issues,
-        "healthy_videos": checked_count - len(issues)
+        "healthy_videos": checked_count - len(issues),
     }
 
 
 # ==============================================================================
 # УТИЛИТЫ И МОНИТОРИНГ
 # ==============================================================================
+
 
 @shared_task
 def cleanup_old_temp_files():
@@ -733,10 +712,10 @@ def cleanup_old_temp_files():
     import time
 
     temp_patterns = [
-        '/tmp/hlsfield_*',
-        '/tmp/hls_*',
-        '/tmp/dash_*',
-        '/tmp/adaptive_*',
+        "/tmp/hlsfield_*",
+        "/tmp/hls_*",
+        "/tmp/dash_*",
+        "/tmp/adaptive_*",
     ]
 
     cleaned = 0
@@ -750,6 +729,7 @@ def cleanup_old_temp_files():
                 if path_obj.stat().st_mtime < cutoff_time:
                     if path_obj.is_dir():
                         import shutil
+
                         shutil.rmtree(path, ignore_errors=True)
                     else:
                         path_obj.unlink(missing_ok=True)
@@ -777,28 +757,34 @@ def generate_video_analytics_report(days: int = 7):
         report = {
             "period": f"Last {days} days",
             "total_events": events.count(),
-            "unique_videos": events.values('video_id').distinct().count(),
-            "unique_sessions": events.values('session_id').distinct().count(),
-            "play_events": events.filter(event_type='play').count(),
-            "completion_events": events.filter(event_type='ended').count(),
-            "error_events": events.filter(event_type='error').count(),
-            "buffer_events": events.filter(event_type='buffer_start').count(),
+            "unique_videos": events.values("video_id").distinct().count(),
+            "unique_sessions": events.values("session_id").distinct().count(),
+            "play_events": events.filter(event_type="play").count(),
+            "completion_events": events.filter(event_type="ended").count(),
+            "error_events": events.filter(event_type="error").count(),
+            "buffer_events": events.filter(event_type="buffer_start").count(),
         }
 
         # Топ видео по просмотрам
-        top_videos = events.filter(event_type='play').values('video_id').annotate(
-            views=models.Count('id')
-        ).order_by('-views')[:10]
-        report['top_videos'] = list(top_videos)
+        top_videos = (
+            events.filter(event_type="play")
+            .values("video_id")
+            .annotate(views=models.Count("id"))
+            .order_by("-views")[:10]
+        )
+        report["top_videos"] = list(top_videos)
 
         # Распределение по качеству
-        quality_dist = events.exclude(quality__isnull=True).values('quality').annotate(
-            count=models.Count('id')
-        ).order_by('-count')
-        report['quality_distribution'] = list(quality_dist)
+        quality_dist = (
+            events.exclude(quality__isnull=True)
+            .values("quality")
+            .annotate(count=models.Count("id"))
+            .order_by("-count")
+        )
+        report["quality_distribution"] = list(quality_dist)
 
         # Сохраняем в кеш
-        cache.set(f'video_analytics_report_{days}d', report, 3600)  # 1 час
+        cache.set(f"video_analytics_report_{days}d", report, 3600)  # 1 час
 
         logger.info(f"Generated analytics report for {days} days")
         return report
@@ -818,13 +804,14 @@ def monitor_transcoding_performance():
         "average_dash_time": 0,
         "success_rate": 0,
         "failed_tasks_24h": 0,
-        "queue_length": 0
+        "queue_length": 0,
     }
 
     try:
         # Анализируем последние задачи
         if CELERY_AVAILABLE:
             from celery import current_app
+
             inspect = current_app.control.inspect()
 
             # Длина очереди
@@ -836,7 +823,7 @@ def monitor_transcoding_performance():
         # Статистика ошибок из логов или базы
         # Здесь можно добавить анализ логов или специальной таблицы
 
-        cache.set('transcoding_performance_stats', stats, 300)  # 5 минут
+        cache.set("transcoding_performance_stats", stats, 300)  # 5 минут
         return stats
 
     except Exception as e:
@@ -847,6 +834,7 @@ def monitor_transcoding_performance():
 # ==============================================================================
 # ЗАДАЧИ ОБСЛУЖИВАНИЯ
 # ==============================================================================
+
 
 @shared_task
 def regenerate_missing_previews(model_label: str, field_name: str):
@@ -887,9 +875,7 @@ def regenerate_missing_previews(model_label: str, field_name: str):
                     preview_tmp = td / "preview.jpg"
 
                     utils.extract_preview(
-                        local_input,
-                        preview_tmp,
-                        at_sec=getattr(field, "preview_at", 3.0)
+                        local_input, preview_tmp, at_sec=getattr(field, "preview_at", 3.0)
                     )
 
                     if preview_tmp.exists():
@@ -914,11 +900,7 @@ def regenerate_missing_previews(model_label: str, field_name: str):
             logger.error(f"Failed to regenerate preview for {instance.pk}: {e}")
             errors += 1
 
-    return {
-        "regenerated": regenerated,
-        "errors": errors,
-        "total_processed": regenerated + errors
-    }
+    return {"regenerated": regenerated, "errors": errors, "total_processed": regenerated + errors}
 
 
 @shared_task
@@ -930,27 +912,32 @@ def update_video_statistics():
         from .views import VideoEvent
 
         # Группируем статистику по видео
-        video_stats = VideoEvent.objects.values('video_id').annotate(
-            total_views=Count('id', filter=models.Q(event_type='play')),
-            unique_viewers=Count('session_id', distinct=True),
-            avg_watch_time=Avg('current_time', filter=models.Q(event_type__in=['ended', 'pause'])),
-            completion_rate=Count('id', filter=models.Q(event_type='ended')) * 100.0 / Count('id', filter=models.Q(
-                event_type='play'))
+        video_stats = VideoEvent.objects.values("video_id").annotate(
+            total_views=Count("id", filter=models.Q(event_type="play")),
+            unique_viewers=Count("session_id", distinct=True),
+            avg_watch_time=Avg("current_time", filter=models.Q(event_type__in=["ended", "pause"])),
+            completion_rate=Count("id", filter=models.Q(event_type="ended"))
+            * 100.0
+            / Count("id", filter=models.Q(event_type="play")),
         )
 
         updated = 0
 
         for stat in video_stats:
-            video_id = stat['video_id']
+            video_id = stat["video_id"]
 
             # Сохраняем в кеш для быстрого доступа
             cache_key = f"video_stats_{video_id}"
-            cache.set(cache_key, {
-                'total_views': stat['total_views'] or 0,
-                'unique_viewers': stat['unique_viewers'] or 0,
-                'avg_watch_time': stat['avg_watch_time'] or 0,
-                'completion_rate': stat['completion_rate'] or 0,
-            }, 3600)  # 1 час
+            cache.set(
+                cache_key,
+                {
+                    "total_views": stat["total_views"] or 0,
+                    "unique_viewers": stat["unique_viewers"] or 0,
+                    "avg_watch_time": stat["avg_watch_time"] or 0,
+                    "completion_rate": stat["completion_rate"] or 0,
+                },
+                3600,
+            )  # 1 час
 
             updated += 1
 
@@ -965,6 +952,7 @@ def update_video_statistics():
 # ==============================================================================
 # ЗАДАЧИ МИГРАЦИИ И ОБСЛУЖИВАНИЯ
 # ==============================================================================
+
 
 @shared_task
 def migrate_old_video_format(model_label: str, field_name: str):
@@ -998,7 +986,7 @@ def migrate_old_video_format(model_label: str, field_name: str):
     for instance in instances:
         try:
             # Запускаем транскодинг для миграции
-            if hasattr(field, 'dash_manifest_field') and hasattr(field, 'hls_playlist_field'):
+            if hasattr(field, "dash_manifest_field") and hasattr(field, "hls_playlist_field"):
                 # Адаптивное поле
                 build_adaptive_for_field.delay(model_label, instance.pk, field_name)
             elif hls_field_name:
@@ -1014,11 +1002,7 @@ def migrate_old_video_format(model_label: str, field_name: str):
             logger.error(f"Failed to queue migration for {instance.pk}: {e}")
             errors += 1
 
-    return {
-        "queued_for_migration": migrated,
-        "errors": errors,
-        "total_found": migrated + errors
-    }
+    return {"queued_for_migration": migrated, "errors": errors, "total_found": migrated + errors}
 
 
 @shared_task
@@ -1033,7 +1017,7 @@ def validate_video_integrity(model_label: str, field_name: str, repair: bool = F
         "corrupted": 0,
         "missing": 0,
         "repaired": 0,
-        "repair_failed": 0
+        "repair_failed": 0,
     }
 
     for instance in Model.objects.all():
@@ -1054,7 +1038,7 @@ def validate_video_integrity(model_label: str, field_name: str, repair: bool = F
                     local_file = utils.pull_to_local(storage, name, td)
                     validation = utils.validate_video_file(local_file)
 
-                    if validation['valid']:
+                    if validation["valid"]:
                         results["valid"] += 1
                     else:
                         results["corrupted"] += 1
@@ -1066,11 +1050,13 @@ def validate_video_integrity(model_label: str, field_name: str, repair: bool = F
                                 _update_instance_status(instance, "repairing")
 
                                 # Определяем тип поля и запускаем соответствующую задачу
-                                if hasattr(field, 'adaptive_base_subdir'):
-                                    build_adaptive_for_field.delay(model_label, instance.pk, field_name)
-                                elif hasattr(field, 'hls_playlist_field'):
+                                if hasattr(field, "adaptive_base_subdir"):
+                                    build_adaptive_for_field.delay(
+                                        model_label, instance.pk, field_name
+                                    )
+                                elif hasattr(field, "hls_playlist_field"):
                                     build_hls_for_field.delay(model_label, instance.pk, field_name)
-                                elif hasattr(field, 'dash_manifest_field'):
+                                elif hasattr(field, "dash_manifest_field"):
                                     build_dash_for_field.delay(model_label, instance.pk, field_name)
 
                                 results["repaired"] += 1
@@ -1078,7 +1064,9 @@ def validate_video_integrity(model_label: str, field_name: str, repair: bool = F
 
                             except Exception as repair_error:
                                 results["repair_failed"] += 1
-                                logger.error(f"Failed to queue repair for {instance.pk}: {repair_error}")
+                                logger.error(
+                                    f"Failed to queue repair for {instance.pk}: {repair_error}"
+                                )
 
                 except Exception as validation_error:
                     logger.error(f"Validation failed for {instance.pk}: {validation_error}")
@@ -1095,6 +1083,7 @@ def validate_video_integrity(model_label: str, field_name: str, repair: bool = F
 # ==============================================================================
 # ЗАДАЧА ОЧИСТКИ И ОПТИМИЗАЦИИ
 # ==============================================================================
+
 
 @shared_task
 def cleanup_orphaned_files(model_label: str, field_name: str, dry_run: bool = True):
@@ -1185,31 +1174,27 @@ def cleanup_orphaned_files(model_label: str, field_name: str, dry_run: bool = Tr
 
 __all__ = [
     # Основные задачи
-    'build_hls_for_field',
-    'build_hls_for_field_sync',
-    'build_dash_for_field',
-    'build_dash_for_field_sync',
-    'build_adaptive_for_field',
-    'build_adaptive_for_field_sync',
-
+    "build_hls_for_field",
+    "build_hls_for_field_sync",
+    "build_dash_for_field",
+    "build_dash_for_field_sync",
+    "build_adaptive_for_field",
+    "build_adaptive_for_field_sync",
     # Прогрессивные задачи
-    'build_progressive_for_field',
-    'build_progressive_for_field_sync',
-
+    "build_progressive_for_field",
+    "build_progressive_for_field_sync",
     # Batch операции
-    'batch_optimize_videos',
-    'optimize_existing_video',
-    'health_check_videos',
-
+    "batch_optimize_videos",
+    "optimize_existing_video",
+    "health_check_videos",
     # Обслуживание
-    'cleanup_old_temp_files',
-    'regenerate_missing_previews',
-    'update_video_statistics',
-    'migrate_old_video_format',
-    'validate_video_integrity',
-    'cleanup_orphaned_files',
-
+    "cleanup_old_temp_files",
+    "regenerate_missing_previews",
+    "update_video_statistics",
+    "migrate_old_video_format",
+    "validate_video_integrity",
+    "cleanup_orphaned_files",
     # Аналитика
-    'generate_video_analytics_report',
-    'monitor_transcoding_performance',
+    "generate_video_analytics_report",
+    "monitor_transcoding_performance",
 ]

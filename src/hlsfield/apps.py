@@ -14,7 +14,7 @@
 import logging
 import os
 import shutil
-import sys
+from pathlib import Path
 from typing import List
 
 from django.apps import AppConfig
@@ -60,7 +60,7 @@ class HLSFieldConfig(AppConfig):
         from . import defaults
 
         # Получаем или создаем logger для пакета
-        hlsfield_logger = logging.getLogger('hlsfield')
+        hlsfield_logger = logging.getLogger("hlsfield")
 
         # Устанавливаем уровень логирования
         if defaults.VERBOSE_LOGGING or settings.DEBUG:
@@ -72,8 +72,7 @@ class HLSFieldConfig(AppConfig):
         if not hlsfield_logger.handlers and not logging.getLogger().handlers:
             handler = logging.StreamHandler()
             formatter = logging.Formatter(
-                '[%(asctime)s] %(name)s.%(levelname)s: %(message)s',
-                datefmt='%H:%M:%S'
+                "[%(asctime)s] %(name)s.%(levelname)s: %(message)s", datefmt="%H:%M:%S"
             )
             handler.setFormatter(formatter)
             hlsfield_logger.addHandler(handler)
@@ -95,6 +94,7 @@ class HLSFieldConfig(AppConfig):
             # Проверяем доступность Celery
             try:
                 import celery
+
                 info_lines.append(f"   Celery: {celery.__version__}")
             except ImportError:
                 info_lines.append("   Celery: not available")
@@ -109,6 +109,7 @@ class HLSFieldConfig(AppConfig):
 # DJANGO SYSTEM CHECKS
 # ==============================================================================
 
+
 def check_ffmpeg_availability(app_configs, **kwargs) -> List[Error]:
     """Проверяет доступность FFmpeg и FFprobe"""
 
@@ -120,13 +121,13 @@ def check_ffmpeg_availability(app_configs, **kwargs) -> List[Error]:
     if not shutil.which(defaults.FFMPEG):
         errors.append(
             Error(
-                'FFmpeg not found',
+                "FFmpeg not found",
                 hint=(
                     f'FFmpeg binary not found at "{defaults.FFMPEG}". '
-                    'Install FFmpeg or set HLSFIELD_FFMPEG setting to correct path.'
+                    "Install FFmpeg or set HLSFIELD_FFMPEG setting to correct path."
                 ),
-                obj='hlsfield.ffmpeg',
-                id='hlsfield.E001',
+                obj="hlsfield.ffmpeg",
+                id="hlsfield.E001",
             )
         )
 
@@ -134,13 +135,13 @@ def check_ffmpeg_availability(app_configs, **kwargs) -> List[Error]:
     if not shutil.which(defaults.FFPROBE):
         errors.append(
             Error(
-                'FFprobe not found',
+                "FFprobe not found",
                 hint=(
                     f'FFprobe binary not found at "{defaults.FFPROBE}". '
-                    'Install FFmpeg or set HLSFIELD_FFPROBE setting to correct path.'
+                    "Install FFmpeg or set HLSFIELD_FFPROBE setting to correct path."
                 ),
-                obj='hlsfield.ffprobe',
-                id='hlsfield.E002',
+                obj="hlsfield.ffprobe",
+                id="hlsfield.E002",
             )
         )
 
@@ -157,14 +158,15 @@ def check_hlsfield_settings(app_configs, **kwargs) -> List[CheckWarning]:
     # Проверяем лестницу качеств
     try:
         from .fields import validate_ladder
+
         validate_ladder(defaults.DEFAULT_LADDER)
     except Exception as e:
         warnings.append(
             CheckWarning(
-                f'Invalid DEFAULT_LADDER configuration: {e}',
-                hint='Check HLSFIELD_DEFAULT_LADDER setting format',
-                obj='hlsfield.settings',
-                id='hlsfield.W001',
+                f"Invalid DEFAULT_LADDER configuration: {e}",
+                hint="Check HLSFIELD_DEFAULT_LADDER setting format",
+                obj="hlsfield.settings",
+                id="hlsfield.W001",
             )
         )
 
@@ -172,21 +174,21 @@ def check_hlsfield_settings(app_configs, **kwargs) -> List[CheckWarning]:
     if defaults.SEGMENT_DURATION < 2 or defaults.SEGMENT_DURATION > 60:
         warnings.append(
             CheckWarning(
-                f'SEGMENT_DURATION ({defaults.SEGMENT_DURATION}s) outside recommended range 2-60s',
-                hint='Very short or long segments may cause playback issues',
-                obj='hlsfield.settings',
-                id='hlsfield.W002',
+                f"SEGMENT_DURATION ({defaults.SEGMENT_DURATION}s) outside recommended range 2-60s",
+                hint="Very short or long segments may cause playback issues",
+                obj="hlsfield.settings",
+                id="hlsfield.W002",
             )
         )
 
     # Проверяем максимальный размер файла
-    if defaults.MAX_FILE_SIZE > 10 * 1024 ** 3:  # > 10GB
+    if defaults.MAX_FILE_SIZE > 10 * 1024**3:  # > 10GB
         warnings.append(
             CheckWarning(
-                f'MAX_FILE_SIZE ({defaults.MAX_FILE_SIZE / (1024 ** 3):.1f}GB) is very large',
-                hint='Large files may cause memory issues during processing',
-                obj='hlsfield.settings',
-                id='hlsfield.W003',
+                f"MAX_FILE_SIZE ({defaults.MAX_FILE_SIZE / (1024 ** 3):.1f}GB) is very large",
+                hint="Large files may cause memory issues during processing",
+                obj="hlsfield.settings",
+                id="hlsfield.W003",
             )
         )
 
@@ -197,40 +199,42 @@ def check_storage_configuration(app_configs, **kwargs) -> List[CheckWarning]:
     """Проверяет настройки storage"""
 
     from django.core.exceptions import ImproperlyConfigured
+
     warnings = []
 
     try:
         from django.conf import settings
+
         # Проверяем MEDIA_ROOT если используется локальное хранение
-        if hasattr(settings, 'DEFAULT_FILE_STORAGE'):
-            if 'FileSystemStorage' in settings.DEFAULT_FILE_STORAGE:
-                media_root = getattr(settings, 'MEDIA_ROOT', '')
+        if hasattr(settings, "DEFAULT_FILE_STORAGE"):
+            if "FileSystemStorage" in settings.DEFAULT_FILE_STORAGE:
+                media_root = getattr(settings, "MEDIA_ROOT", "")
 
                 if not media_root:
                     warnings.append(
                         CheckWarning(
-                            'MEDIA_ROOT not set with FileSystemStorage',
-                            hint='Set MEDIA_ROOT for file uploads to work properly',
-                            obj='django.settings',
-                            id='hlsfield.W004',
+                            "MEDIA_ROOT not set with FileSystemStorage",
+                            hint="Set MEDIA_ROOT for file uploads to work properly",
+                            obj="django.settings",
+                            id="hlsfield.W004",
                         )
                     )
                 elif not os.path.exists(media_root):
                     warnings.append(
                         CheckWarning(
-                            f'MEDIA_ROOT directory does not exist: {media_root}',
-                            hint='Create the directory or update MEDIA_ROOT setting',
-                            obj='django.settings',
-                            id='hlsfield.W005',
+                            f"MEDIA_ROOT directory does not exist: {media_root}",
+                            hint="Create the directory or update MEDIA_ROOT setting",
+                            obj="django.settings",
+                            id="hlsfield.W005",
                         )
                     )
                 elif not os.access(media_root, os.W_OK):
                     warnings.append(
                         CheckWarning(
-                            f'MEDIA_ROOT is not writable: {media_root}',
-                            hint='Check directory permissions',
-                            obj='django.settings',
-                            id='hlsfield.W006',
+                            f"MEDIA_ROOT is not writable: {media_root}",
+                            hint="Check directory permissions",
+                            obj="django.settings",
+                            id="hlsfield.W006",
                         )
                     )
 
@@ -244,6 +248,7 @@ def check_storage_configuration(app_configs, **kwargs) -> List[CheckWarning]:
 # ==============================================================================
 # УПРАВЛЕНИЕ ЖИЗНЕННЫМ ЦИКЛОМ
 # ==============================================================================
+
 
 class HLSFieldReadyState:
     """Отслеживает состояние готовности приложения"""
@@ -278,20 +283,21 @@ class HLSFieldReadyState:
 # АВТОМАТИЧЕСКИЕ МИГРАЦИИ (при необходимости)
 # ==============================================================================
 
+
 def auto_create_media_directories():
     """Автоматически создает необходимые директории"""
 
-    if not hasattr(settings, 'MEDIA_ROOT') or not settings.MEDIA_ROOT:
+    if not hasattr(settings, "MEDIA_ROOT") or not settings.MEDIA_ROOT:
         return
 
     media_root = Path(settings.MEDIA_ROOT)
 
     # Создаем базовую структуру директорий
     directories = [
-        media_root / 'videos',
-        media_root / 'videos' / 'hls',
-        media_root / 'videos' / 'dash',
-        media_root / 'videos' / 'previews',
+        media_root / "videos",
+        media_root / "videos" / "hls",
+        media_root / "videos" / "dash",
+        media_root / "videos" / "previews",
     ]
 
     created = []
@@ -311,6 +317,7 @@ def auto_create_media_directories():
 # ИНТЕГРАЦИЯ С DJANGO DEBUG TOOLBAR (опционально)
 # ==============================================================================
 
+
 def setup_debug_toolbar_panels():
     """Добавляет панели в Django Debug Toolbar если доступно"""
 
@@ -318,11 +325,12 @@ def setup_debug_toolbar_panels():
         from debug_toolbar.settings import CONFIG
 
         # Добавляем нашу панель для мониторинга видео обработки
-        if 'hlsfield.debug.VideoProcessingPanel' not in CONFIG['SHOW_TOOLBAR_CALLBACK']:
+        if "hlsfield.debug.VideoProcessingPanel" not in CONFIG["SHOW_TOOLBAR_CALLBACK"]:
             pass  # Реализация панели в debug.py
 
     except ImportError:
         pass  # Debug toolbar не установлен
+
 
 # ==============================================================================
 # СИГНАЛЫ ДЛЯ ИНТЕГРАЦИИ

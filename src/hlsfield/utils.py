@@ -31,7 +31,7 @@ from .exceptions import (
     StorageError,
     TimeoutError,
     TranscodingError,
-    ConfigurationError
+    ConfigurationError,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 # ==============================================================================
 # КОНТЕКСТНЫЕ МЕНЕДЖЕРЫ
 # ==============================================================================
+
 
 @contextmanager
 def tempdir(prefix: str = "hlsfield_"):
@@ -72,6 +73,7 @@ def ensure_binary_available(binary_name: str, path: str) -> str:
 # ВЫПОЛНЕНИЕ КОМАНД FFMPEG
 # ==============================================================================
 
+
 def run(cmd: List[str], timeout_sec: Optional[int] = None) -> subprocess.CompletedProcess:
     """Выполняет команду с обработкой ошибок и таймаутами"""
     if not cmd:
@@ -83,18 +85,14 @@ def run(cmd: List[str], timeout_sec: Optional[int] = None) -> subprocess.Complet
     if timeout_sec is None:
         timeout_sec = defaults.FFMPEG_TIMEOUT
 
-    cmd_str = ' '.join(cmd)
+    cmd_str = " ".join(cmd)
     logger.debug(f"Executing command: {cmd_str}")
 
     start_time = time.time()
 
     try:
         result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout_sec,
-            check=False
+            cmd, capture_output=True, text=True, timeout=timeout_sec, check=False
         )
 
         elapsed = time.time() - start_time
@@ -145,22 +143,25 @@ def _handle_ffmpeg_error(cmd: List[str], returncode: int, stdout: str, stderr: s
 # АНАЛИЗ ВИДЕОФАЙЛОВ
 # ==============================================================================
 
+
 def ffprobe_streams(input_path: Union[str, Path]) -> Dict[str, Any]:
     """Анализирует видеофайл и возвращает информацию о потоках"""
     cmd = [
         defaults.FFPROBE,
-        "-v", "error",
-        "-print_format", "json",
+        "-v",
+        "error",
+        "-print_format",
+        "json",
         "-show_format",
         "-show_streams",
-        str(input_path)
+        str(input_path),
     ]
 
     try:
         result = run(cmd, timeout_sec=30)
         data = json.loads(result.stdout)
 
-        if 'streams' not in data:
+        if "streams" not in data:
             raise InvalidVideoError("No streams found in video file")
 
         return data
@@ -198,32 +199,34 @@ def get_video_info_quick(file_path: Union[str, Path]) -> Dict[str, Any]:
     try:
         cmd = [
             defaults.FFPROBE,
-            "-v", "error",
-            "-print_format", "json",
+            "-v",
+            "error",
+            "-print_format",
+            "json",
             "-show_format",
-            str(file_path)
+            str(file_path),
         ]
 
         result = run(cmd, timeout_sec=15)
         data = json.loads(result.stdout)
-        format_info = data.get('format', {})
+        format_info = data.get("format", {})
 
         return {
-            'duration': float(format_info.get('duration', 0)),
-            'size': int(format_info.get('size', 0)),
-            'bitrate': int(format_info.get('bit_rate', 0)),
-            'format_name': format_info.get('format_name', 'unknown'),
-            'nb_streams': int(format_info.get('nb_streams', 0)),
+            "duration": float(format_info.get("duration", 0)),
+            "size": int(format_info.get("size", 0)),
+            "bitrate": int(format_info.get("bit_rate", 0)),
+            "format_name": format_info.get("format_name", "unknown"),
+            "nb_streams": int(format_info.get("nb_streams", 0)),
         }
 
     except Exception as e:
         logger.warning(f"Quick video info failed: {e}")
         return {
-            'duration': 0,
-            'size': 0,
-            'bitrate': 0,
-            'format_name': 'unknown',
-            'nb_streams': 0,
+            "duration": 0,
+            "size": 0,
+            "bitrate": 0,
+            "format_name": "unknown",
+            "nb_streams": 0,
         }
 
 
@@ -231,8 +234,14 @@ def get_video_info_quick(file_path: Union[str, Path]) -> Dict[str, Any]:
 # ИЗВЛЕЧЕНИЕ ПРЕВЬЮ
 # ==============================================================================
 
-def extract_preview(input_path: Path, out_image: Path, at_sec: float = 3.0,
-                    width: Optional[int] = None, height: Optional[int] = None) -> Path:
+
+def extract_preview(
+    input_path: Path,
+    out_image: Path,
+    at_sec: float = 3.0,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+) -> Path:
     """Извлекает превью кадр из видео"""
     max_attempts = 3
     attempt_times = [at_sec, 1.0, 0.0]
@@ -242,12 +251,18 @@ def extract_preview(input_path: Path, out_image: Path, at_sec: float = 3.0,
             seek_time = attempt_times[attempt] if attempt < len(attempt_times) else attempt
 
             cmd = [
-                defaults.FFMPEG, "-y",
-                "-ss", str(seek_time),
-                "-i", str(input_path),
-                "-frames:v", "1",
-                "-q:v", "2",
-                "-f", "image2"
+                defaults.FFMPEG,
+                "-y",
+                "-ss",
+                str(seek_time),
+                "-i",
+                str(input_path),
+                "-frames:v",
+                "1",
+                "-q:v",
+                "2",
+                "-f",
+                "image2",
             ]
 
             if width or height:
@@ -285,11 +300,14 @@ def extract_preview(input_path: Path, out_image: Path, at_sec: float = 3.0,
 # HLS ТРАНСКОДИНГ
 # ==============================================================================
 
-def transcode_hls_variants(input_path: Path, out_dir: Path,
-                           ladder: List[Dict], segment_duration: int = 6) -> Path:
+
+def transcode_hls_variants(
+    input_path: Path, out_dir: Path, ladder: List[Dict], segment_duration: int = 6
+) -> Path:
     """Создает HLS адаптивный стрим"""
     try:
         from .fields import validate_ladder
+
         validate_ladder(ladder)
 
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -302,7 +320,7 @@ def transcode_hls_variants(input_path: Path, out_dir: Path,
             raise InvalidVideoError("No video stream found in input file")
 
         has_audio = audio_stream is not None
-        source_height = int(video_stream.get('height', 0))
+        source_height = int(video_stream.get("height", 0))
 
         filtered_ladder = _filter_ladder_by_source(ladder, source_height)
         logger.info(f"Transcoding {len(filtered_ladder)} HLS variants")
@@ -338,17 +356,18 @@ def transcode_hls_variants(input_path: Path, out_dir: Path,
 
 def _filter_ladder_by_source(ladder: List[Dict], source_height: int) -> List[Dict]:
     """Фильтрует лестницу качеств по исходному разрешению"""
-    filtered = [r for r in ladder if r['height'] <= source_height * 1.1]
+    filtered = [r for r in ladder if r["height"] <= source_height * 1.1]
 
     if not filtered:
-        filtered = [min(ladder, key=lambda x: x['height'])]
+        filtered = [min(ladder, key=lambda x: x["height"])]
         logger.warning(f"All ladder heights exceed source {source_height}p, using lowest")
 
-    return sorted(filtered, key=lambda x: x['height'])
+    return sorted(filtered, key=lambda x: x["height"])
 
 
-def _create_hls_variant(input_path: Path, out_dir: Path, rung: Dict,
-                        segment_duration: int, has_audio: bool) -> Dict:
+def _create_hls_variant(
+    input_path: Path, out_dir: Path, rung: Dict, segment_duration: int, has_audio: bool
+) -> Dict:
     """Создает один вариант качества HLS"""
     height = int(rung["height"])
     v_bitrate = int(rung["v_bitrate"])
@@ -359,53 +378,84 @@ def _create_hls_variant(input_path: Path, out_dir: Path, rung: Dict,
     playlist_file = variant_dir / "index.m3u8"
 
     cmd = [
-        defaults.FFMPEG, "-y",
-        "-i", str(input_path),
-        "-map", "0:v:0",
+        defaults.FFMPEG,
+        "-y",
+        "-i",
+        str(input_path),
+        "-map",
+        "0:v:0",
     ]
 
     # Видео фильтры
     vf_parts = [
         f"scale=w=-2:h={height}:force_original_aspect_ratio=decrease",
-        "pad=ceil(iw/2)*2:ceil(ih/2)*2"
+        "pad=ceil(iw/2)*2:ceil(ih/2)*2",
     ]
 
-    cmd.extend([
-        "-vf", ",".join(vf_parts),
-        "-c:v", "libx264",
-        "-profile:v", defaults.H264_PROFILE,
-        "-preset", defaults.FFMPEG_PRESET,
-        "-b:v", f"{v_bitrate}k",
-        "-maxrate", f"{int(v_bitrate * 1.07)}k",
-        "-bufsize", f"{v_bitrate * 2}k",
-        "-pix_fmt", defaults.PIXEL_FORMAT,
-        "-g", str(segment_duration * 30),
-        "-keyint_min", str(segment_duration * 30),
-        "-sc_threshold", "0",
-    ])
+    cmd.extend(
+        [
+            "-vf",
+            ",".join(vf_parts),
+            "-c:v",
+            "libx264",
+            "-profile:v",
+            defaults.H264_PROFILE,
+            "-preset",
+            defaults.FFMPEG_PRESET,
+            "-b:v",
+            f"{v_bitrate}k",
+            "-maxrate",
+            f"{int(v_bitrate * 1.07)}k",
+            "-bufsize",
+            f"{v_bitrate * 2}k",
+            "-pix_fmt",
+            defaults.PIXEL_FORMAT,
+            "-g",
+            str(segment_duration * 30),
+            "-keyint_min",
+            str(segment_duration * 30),
+            "-sc_threshold",
+            "0",
+        ]
+    )
 
     # Аудио
     if has_audio and a_bitrate > 0:
-        cmd.extend([
-            "-map", "0:a:0",
-            "-c:a", defaults.AUDIO_CODEC,
-            "-b:a", f"{a_bitrate}k",
-            "-ac", str(defaults.AUDIO_CHANNELS),
-            "-ar", str(defaults.AUDIO_SAMPLE_RATE),
-        ])
+        cmd.extend(
+            [
+                "-map",
+                "0:a:0",
+                "-c:a",
+                defaults.AUDIO_CODEC,
+                "-b:a",
+                f"{a_bitrate}k",
+                "-ac",
+                str(defaults.AUDIO_CHANNELS),
+                "-ar",
+                str(defaults.AUDIO_SAMPLE_RATE),
+            ]
+        )
     else:
         cmd.append("-an")
 
     # HLS параметры
-    cmd.extend([
-        "-f", "hls",
-        "-hls_time", str(segment_duration),
-        "-hls_playlist_type", "vod",
-        "-hls_segment_type", "mpegts",
-        "-hls_segment_filename", str(variant_dir / "seg_%04d.ts"),
-        "-hls_flags", "single_file+independent_segments",
-        str(playlist_file)
-    ])
+    cmd.extend(
+        [
+            "-f",
+            "hls",
+            "-hls_time",
+            str(segment_duration),
+            "-hls_playlist_type",
+            "vod",
+            "-hls_segment_type",
+            "mpegts",
+            "-hls_segment_filename",
+            str(variant_dir / "seg_%04d.ts"),
+            "-hls_flags",
+            "single_file+independent_segments",
+            str(playlist_file),
+        ]
+    )
 
     run(cmd, timeout_sec=600)
 
@@ -433,21 +483,17 @@ def _create_hls_master_playlist(out_dir: Path, variants: List[Dict]) -> Path:
     """Создает master.m3u8 плейлист"""
     master_file = out_dir / "master.m3u8"
 
-    lines = [
-        "#EXTM3U",
-        "#EXT-X-VERSION:3"
-    ]
+    lines = ["#EXTM3U", "#EXT-X-VERSION:3"]
 
     sorted_variants = sorted(variants, key=lambda x: x["height"])
 
     for variant in sorted_variants:
         stream_inf = f"#EXT-X-STREAM-INF:BANDWIDTH={variant['bandwidth']}"
         stream_inf += f",RESOLUTION={variant['resolution']}"
-        stream_inf += f",CODECS=\"avc1.42E01E,mp4a.40.2\""
+        stream_inf += f',CODECS="avc1.42E01E,mp4a.40.2"'
 
         lines.append(stream_inf)
         lines.append(f"{variant['dir']}/{variant['playlist']}")
-
     master_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return master_file
 
@@ -456,11 +502,14 @@ def _create_hls_master_playlist(out_dir: Path, variants: List[Dict]) -> Path:
 # DASH ТРАНСКОДИНГ
 # ==============================================================================
 
-def transcode_dash_variants(input_path: Path, out_dir: Path,
-                            ladder: List[Dict], segment_duration: int = 4) -> Path:
+
+def transcode_dash_variants(
+    input_path: Path, out_dir: Path, ladder: List[Dict], segment_duration: int = 4
+) -> Path:
     """Создает DASH адаптивный стрим"""
     try:
         from .fields import validate_ladder
+
         validate_ladder(ladder)
 
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -472,7 +521,7 @@ def transcode_dash_variants(input_path: Path, out_dir: Path,
             raise InvalidVideoError("No video stream found")
 
         has_audio = audio_stream is not None
-        source_height = int(video_stream.get('height', 0))
+        source_height = int(video_stream.get("height", 0))
         filtered_ladder = _filter_ladder_by_source(ladder, source_height)
 
         logger.info(f"Creating DASH with {len(filtered_ladder)} representations")
@@ -490,15 +539,24 @@ def transcode_dash_variants(input_path: Path, out_dir: Path,
             filter_complex_parts.append(f"[0:v]{scale_filter},{pad_filter}[v{i}]")
 
             cmd.extend(["-map", f"[v{i}]"])
-            cmd.extend([
-                f"-c:v:{i}", "libx264",
-                f"-preset:v:{i}", defaults.FFMPEG_PRESET,
-                f"-profile:v:{i}", defaults.H264_PROFILE,
-                f"-b:v:{i}", f"{v_bitrate}k",
-                f"-maxrate:v:{i}", f"{int(v_bitrate * 1.07)}k",
-                f"-bufsize:v:{i}", f"{v_bitrate * 2}k",
-                f"-pix_fmt:v:{i}", defaults.PIXEL_FORMAT,
-            ])
+            cmd.extend(
+                [
+                    f"-c:v:{i}",
+                    "libx264",
+                    f"-preset:v:{i}",
+                    defaults.FFMPEG_PRESET,
+                    f"-profile:v:{i}",
+                    defaults.H264_PROFILE,
+                    f"-b:v:{i}",
+                    f"{v_bitrate}k",
+                    f"-maxrate:v:{i}",
+                    f"{int(v_bitrate * 1.07)}k",
+                    f"-bufsize:v:{i}",
+                    f"{v_bitrate * 2}k",
+                    f"-pix_fmt:v:{i}",
+                    defaults.PIXEL_FORMAT,
+                ]
+            )
 
         # Аудио представления
         if has_audio:
@@ -506,12 +564,18 @@ def transcode_dash_variants(input_path: Path, out_dir: Path,
                 a_bitrate = int(rung["a_bitrate"])
                 if a_bitrate > 0:
                     cmd.extend(["-map", "0:a:0"])
-                    cmd.extend([
-                        f"-c:a:{i}", defaults.AUDIO_CODEC,
-                        f"-b:a:{i}", f"{a_bitrate}k",
-                        f"-ac:a:{i}", str(defaults.AUDIO_CHANNELS),
-                        f"-ar:a:{i}", str(defaults.AUDIO_SAMPLE_RATE),
-                    ])
+                    cmd.extend(
+                        [
+                            f"-c:a:{i}",
+                            defaults.AUDIO_CODEC,
+                            f"-b:a:{i}",
+                            f"{a_bitrate}k",
+                            f"-ac:a:{i}",
+                            str(defaults.AUDIO_CHANNELS),
+                            f"-ar:a:{i}",
+                            str(defaults.AUDIO_SAMPLE_RATE),
+                        ]
+                    )
 
         # Filter complex
         if filter_complex_parts:
@@ -519,16 +583,25 @@ def transcode_dash_variants(input_path: Path, out_dir: Path,
 
         # DASH параметры
         manifest_file = out_dir / "manifest.mpd"
-        cmd.extend([
-            "-f", "dash",
-            "-seg_duration", str(segment_duration),
-            "-use_template", "1",
-            "-use_timeline", "1",
-            "-init_seg_name", "init-$RepresentationID$.$ext$",
-            "-media_seg_name", "chunk-$RepresentationID$-$Number%05d$.$ext$",
-            "-adaptation_sets", "id=0,streams=v id=1,streams=a" if has_audio else "id=0,streams=v",
-            str(manifest_file)
-        ])
+        cmd.extend(
+            [
+                "-f",
+                "dash",
+                "-seg_duration",
+                str(segment_duration),
+                "-use_template",
+                "1",
+                "-use_timeline",
+                "1",
+                "-init_seg_name",
+                "init-$RepresentationID$.$ext$",
+                "-media_seg_name",
+                "chunk-$RepresentationID$-$Number%05d$.$ext$",
+                "-adaptation_sets",
+                "id=0,streams=v id=1,streams=a" if has_audio else "id=0,streams=v",
+                str(manifest_file),
+            ]
+        )
 
         run(cmd, timeout_sec=900)
 
@@ -553,8 +626,10 @@ def transcode_dash_variants(input_path: Path, out_dir: Path,
 # КОМБИНИРОВАННЫЙ HLS + DASH
 # ==============================================================================
 
-def transcode_adaptive_variants(input_path: Path, out_dir: Path,
-                                ladder: List[Dict], segment_duration: int = 6) -> Dict[str, Path]:
+
+def transcode_adaptive_variants(
+    input_path: Path, out_dir: Path, ladder: List[Dict], segment_duration: int = 6
+) -> Dict[str, Path]:
     """Создает одновременно HLS и DASH стримы"""
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -593,6 +668,7 @@ def transcode_adaptive_variants(input_path: Path, out_dir: Path,
 # РАБОТА СО STORAGE
 # ==============================================================================
 
+
 def pull_to_local(storage, name: str, dst_dir: Path) -> Path:
     """Загружает файл из storage в локальную директорию"""
     try:
@@ -621,7 +697,7 @@ def pull_to_local(storage, name: str, dst_dir: Path) -> Path:
 
     except Exception as e:
         logger.error(f"Error pulling file {name}: {e}")
-        if 'dst' in locals() and dst.exists():
+        if "dst" in locals() and dst.exists():
             try:
                 dst.unlink()
             except:
@@ -666,78 +742,74 @@ def save_tree_to_storage(local_root: Path, storage, base_path: str) -> List[str]
 # ВАЛИДАЦИЯ
 # ==============================================================================
 
+
 def validate_video_file(file_path: Union[str, Path]) -> Dict[str, Any]:
     """Выполняет базовую валидацию видеофайла"""
     path = Path(file_path)
 
-    validation = {
-        'valid': False,
-        'issues': [],
-        'warnings': [],
-        'info': {}
-    }
+    validation = {"valid": False, "issues": [], "warnings": [], "info": {}}
 
     # Проверяем существование файла
     if not path.exists():
-        validation['issues'].append("File does not exist")
+        validation["issues"].append("File does not exist")
         return validation
 
     # Проверяем размер файла
     size = path.stat().st_size
-    validation['info']['size'] = size
+    validation["info"]["size"] = size
 
     if size < defaults.MIN_FILE_SIZE:
-        validation['issues'].append(f"File too small: {size} bytes")
+        validation["issues"].append(f"File too small: {size} bytes")
 
     if size > defaults.MAX_FILE_SIZE:
-        validation['issues'].append(f"File too large: {size} bytes")
+        validation["issues"].append(f"File too large: {size} bytes")
 
     # Проверяем расширение
     ext = path.suffix.lower()
-    validation['info']['extension'] = ext
+    validation["info"]["extension"] = ext
 
     if ext not in defaults.ALLOWED_EXTENSIONS:
-        validation['issues'].append(f"Unsupported file extension: {ext}")
+        validation["issues"].append(f"Unsupported file extension: {ext}")
 
     # Анализируем через FFprobe
     try:
         info = ffprobe_streams(path)
         video_stream, audio_stream = pick_video_audio_streams(info)
 
-        validation['info']['has_video'] = video_stream is not None
-        validation['info']['has_audio'] = audio_stream is not None
+        validation["info"]["has_video"] = video_stream is not None
+        validation["info"]["has_audio"] = audio_stream is not None
 
         if video_stream:
-            width = int(video_stream.get('width', 0))
-            height = int(video_stream.get('height', 0))
+            width = int(video_stream.get("width", 0))
+            height = int(video_stream.get("height", 0))
 
-            validation['info']['width'] = width
-            validation['info']['height'] = height
-            validation['info']['codec'] = video_stream.get('codec_name', 'unknown')
+            validation["info"]["width"] = width
+            validation["info"]["height"] = height
+            validation["info"]["codec"] = video_stream.get("codec_name", "unknown")
 
             if height < defaults.MIN_VIDEO_HEIGHT:
-                validation['issues'].append(f"Height too small: {height}p")
+                validation["issues"].append(f"Height too small: {height}p")
             if height > defaults.MAX_VIDEO_HEIGHT:
-                validation['issues'].append(f"Height too large: {height}p")
+                validation["issues"].append(f"Height too large: {height}p")
             if width % 2 != 0 or height % 2 != 0:
-                validation['warnings'].append("Odd dimensions may cause encoding issues")
+                validation["warnings"].append("Odd dimensions may cause encoding issues")
         else:
-            validation['issues'].append("No video stream found")
+            validation["issues"].append("No video stream found")
 
         # Проверяем длительность
-        if format_info := info.get('format'):
+        if format_info := info.get("format"):
             try:
-                duration = float(format_info.get('duration', 0))
-                validation['info']['duration'] = duration
+                duration = float(format_info.get("duration", 0))
+                validation["info"]["duration"] = duration
                 if duration > defaults.MAX_VIDEO_DURATION:
-                    validation['issues'].append(f"Video too long: {duration}s")
+                    validation["issues"].append(f"Video too long: {duration}s")
             except (ValueError, TypeError):
-                validation['warnings'].append("Could not determine video duration")
+                validation["warnings"].append("Could not determine video duration")
 
     except Exception as e:
-        validation['issues'].append(f"Cannot analyze video: {e}")
+        validation["issues"].append(f"Cannot analyze video: {e}")
 
-    validation['valid'] = len(validation['issues']) == 0
+    validation["valid"] = len(validation["issues"]) == 0
     return validation
 
 
@@ -747,29 +819,23 @@ def validate_video_file(file_path: Union[str, Path]) -> Dict[str, Any]:
 
 __all__ = [
     # Контекстные менеджеры
-    'tempdir',
-
+    "tempdir",
     # Выполнение команд
-    'run',
-    'ensure_binary_available',
-
+    "run",
+    "ensure_binary_available",
     # Анализ видео
-    'ffprobe_streams',
-    'pick_video_audio_streams',
-    'get_video_info_quick',
-
+    "ffprobe_streams",
+    "pick_video_audio_streams",
+    "get_video_info_quick",
     # Превью
-    'extract_preview',
-
+    "extract_preview",
     # Транскодинг
-    'transcode_hls_variants',
-    'transcode_dash_variants',
-    'transcode_adaptive_variants',
-
+    "transcode_hls_variants",
+    "transcode_dash_variants",
+    "transcode_adaptive_variants",
     # Storage
-    'pull_to_local',
-    'save_tree_to_storage',
-
+    "pull_to_local",
+    "save_tree_to_storage",
     # Валидация
-    'validate_video_file',
+    "validate_video_file",
 ]

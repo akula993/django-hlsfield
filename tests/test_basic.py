@@ -1,8 +1,10 @@
 import pytest
 from django.test import TestCase
+
 from hlsfield import VideoField, HLSVideoField
 
 
+@pytest.mark.django_db
 class TestBasicImports(TestCase):
     def test_imports(self):
         """Тест базового импорта"""

@@ -26,7 +26,7 @@ from django.db import models
 from django.utils import timezone
 
 from . import defaults, utils
-from .exceptions import HLSFieldError, InvalidVideoError, StorageError
+from .exceptions import InvalidVideoError, StorageError, FFmpegNotFoundError
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -39,6 +39,7 @@ PREVIEW_SUFFIX = "_preview.jpg"
 # ==============================================================================
 # БАЗОВЫЙ КЛАСС ДЛЯ РАБОТЫ С ВИДЕОФАЙЛАМИ
 # ==============================================================================
+
 
 class VideoFieldFile(models.fields.files.FieldFile):
     """
@@ -90,12 +91,9 @@ class VideoFieldFile(models.fields.files.FieldFile):
         inst = self.instance
 
         # Проверяем настроены ли поля модели для метаданных
-        have_model_fields = any([
-            field.duration_field,
-            field.width_field,
-            field.height_field,
-            field.preview_field
-        ])
+        have_model_fields = any(
+            [field.duration_field, field.width_field, field.height_field, field.preview_field]
+        )
 
         if have_model_fields:
             out = {}
@@ -234,7 +232,7 @@ class VideoFieldFile(models.fields.files.FieldFile):
             logger.error(f"Error saving video file {name}: {e}")
 
             # Очищаем при критических ошибках
-            if isinstance(e, (InvalidVideoError, StorageError)):
+            if isinstance(e, (InvalidVideoError, FFmpegNotFoundError)):
                 self._cleanup_on_error()
 
             raise
@@ -243,22 +241,22 @@ class VideoFieldFile(models.fields.files.FieldFile):
         """Валидация загружаемого видеофайла"""
 
         # Проверяем размер
-        if hasattr(content, 'size') and content.size:
-            max_size = getattr(defaults, 'MAX_FILE_SIZE', 2 * 1024 ** 3)  # 2GB
+        if hasattr(content, "size") and content.size:
+            max_size = getattr(defaults, "MAX_FILE_SIZE", 2 * 1024**3)  # 2GB
             if content.size > max_size:
-                raise InvalidVideoError(
-                    f"File too large: {content.size} bytes (max: {max_size})"
-                )
+                raise InvalidVideoError(f"File too large: {content.size} bytes (max: {max_size})")
 
             if content.size < 1000:  # Минимум 1KB
                 raise InvalidVideoError("File too small to be a valid video")
 
         # Проверяем расширение
-        if hasattr(content, 'name') and content.name:
+        if hasattr(content, "name") and content.name:
             ext = Path(content.name).suffix.lower()
-            allowed_exts = getattr(defaults, 'ALLOWED_EXTENSIONS', [
-                '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv'
-            ])
+            allowed_exts = getattr(
+                defaults,
+                "ALLOWED_EXTENSIONS",
+                [".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm", ".mkv"],
+            )
 
             if ext not in allowed_exts:
                 raise InvalidVideoError(f"Unsupported file extension: {ext}")
@@ -281,7 +279,7 @@ class VideoFieldFile(models.fields.files.FieldFile):
                     meta = {}
 
                     # Длительность из format секции
-                    if (fmt := info.get("format")):
+                    if fmt := info.get("format"):
                         try:
                             duration = float(fmt.get("duration", 0))
                             if duration > 0:
@@ -311,18 +309,18 @@ class VideoFieldFile(models.fields.files.FieldFile):
                 self._create_preview(field, inst, local_path, td)
 
                 # Обновляем timestamp обработки
-                if hasattr(inst, 'video_processed_at'):
-                    setattr(inst, 'video_processed_at', timezone.now())
+                if hasattr(inst, "video_processed_at"):
+                    setattr(inst, "video_processed_at", timezone.now())
 
         except Exception as e:
             logger.error(f"Video processing failed for {self.name}: {e}")
 
             # Устанавливаем статус ошибки
-            if hasattr(inst, 'processing_status'):
-                setattr(inst, 'processing_status', f'error: {str(e)[:100]}')
+            if hasattr(inst, "processing_status"):
+                setattr(inst, "processing_status", f"error: {str(e)[:100]}")
 
             # Критические ошибки прерывают процесс
-            if isinstance(e, (InvalidVideoError, utils.FFmpegNotFoundError)):
+            if isinstance(e, (InvalidVideoError, FFmpegNotFoundError)):
                 raise
 
     def _save_metadata_to_model(self, field: VideoField, inst, meta: dict):
@@ -365,11 +363,18 @@ class VideoFieldFile(models.fields.files.FieldFile):
                     setattr(inst, field.preview_field, saved_path)
 
                 # Добавляем в метаданные JSON файла если нет полей модели
-                if not any([field.duration_field, field.width_field,
-                            field.height_field, field.preview_field]):
+                if not any(
+                    [
+                        field.duration_field,
+                        field.width_field,
+                        field.height_field,
+                        field.preview_field,
+                    ]
+                ):
                     meta = {"preview_name": saved_path}
                     try:
                         from io import StringIO
+
                         payload = json.dumps(meta, ensure_ascii=False)
                         self.storage.save(self._meta_key(), StringIO(payload))
                     except Exception as e:
@@ -398,6 +403,7 @@ class VideoFieldFile(models.fields.files.FieldFile):
 # БАЗОВОЕ ВИДЕО ПОЛЕ
 # ==============================================================================
 
+
 class VideoField(models.FileField):
     """
     Базовое поле для работы с видеофайлами.
@@ -422,26 +428,25 @@ class VideoField(models.FileField):
 
     attr_class = VideoFieldFile
 
-    def __init__(self, *args,
-                 # Поля модели для автозаполнения метаданных
-                 duration_field: str | None = None,
-                 width_field: str | None = None,
-                 height_field: str | None = None,
-                 preview_field: str | None = None,
-
-                 # Настройки обработки
-                 preview_at: float = 3.0,
-                 process_on_save: bool = True,
-
-                 # Настройки файловой структуры
-                 sidecar_layout: str | None = None,  # "flat" | "nested"
-                 preview_filename: str | None = None,  # имя для nested
-                 meta_filename: str | None = None,  # имя для nested
-
-                 # Автоматический upload_to
-                 use_default_upload_to: bool | None = None,
-
-                 **kwargs: Any):
+    def __init__(
+        self,
+        *args,
+        # Поля модели для автозаполнения метаданных
+        duration_field: str | None = None,
+        width_field: str | None = None,
+        height_field: str | None = None,
+        preview_field: str | None = None,
+        # Настройки обработки
+        preview_at: float = 3.0,
+        process_on_save: bool = True,
+        # Настройки файловой структуры
+        sidecar_layout: str | None = None,  # "flat" | "nested"
+        preview_filename: str | None = None,  # имя для nested
+        meta_filename: str | None = None,  # имя для nested
+        # Автоматический upload_to
+        use_default_upload_to: bool | None = None,
+        **kwargs: Any,
+    ):
 
         # ============================================================================
         # АВТО-ЛОГИКА upload_to
@@ -452,9 +457,11 @@ class VideoField(models.FileField):
 
         # Если поле не получило явный upload_to - применяем дефолт
         if not has_explicit:
-            use_flag = (defaults.USE_DEFAULT_UPLOAD_TO
-                        if use_default_upload_to is None
-                        else bool(use_default_upload_to))
+            use_flag = (
+                defaults.USE_DEFAULT_UPLOAD_TO
+                if use_default_upload_to is None
+                else bool(use_default_upload_to)
+            )
 
             if use_flag:
                 # Пробуем получить функцию из настроек
@@ -493,23 +500,23 @@ class VideoField(models.FileField):
 
         # Добавляем наши специфические параметры
         if self.duration_field is not None:
-            kwargs['duration_field'] = self.duration_field
+            kwargs["duration_field"] = self.duration_field
         if self.width_field is not None:
-            kwargs['width_field'] = self.width_field
+            kwargs["width_field"] = self.width_field
         if self.height_field is not None:
-            kwargs['height_field'] = self.height_field
+            kwargs["height_field"] = self.height_field
         if self.preview_field is not None:
-            kwargs['preview_field'] = self.preview_field
+            kwargs["preview_field"] = self.preview_field
         if self.preview_at != 3.0:
-            kwargs['preview_at'] = self.preview_at
+            kwargs["preview_at"] = self.preview_at
         if not self.process_on_save:
-            kwargs['process_on_save'] = self.process_on_save
+            kwargs["process_on_save"] = self.process_on_save
         if self.sidecar_layout != defaults.SIDECAR_LAYOUT:
-            kwargs['sidecar_layout'] = self.sidecar_layout
+            kwargs["sidecar_layout"] = self.sidecar_layout
         if self.preview_filename != defaults.PREVIEW_FILENAME:
-            kwargs['preview_filename'] = self.preview_filename
+            kwargs["preview_filename"] = self.preview_filename
         if self.meta_filename != defaults.META_FILENAME:
-            kwargs['meta_filename'] = self.meta_filename
+            kwargs["meta_filename"] = self.meta_filename
 
         return name, path, args, kwargs
 
@@ -517,6 +524,7 @@ class VideoField(models.FileField):
 # ==============================================================================
 # HLS VIDEO FIELD - HTTP LIVE STREAMING
 # ==============================================================================
+
 
 class HLSVideoFieldFile(VideoFieldFile):
     """FieldFile для HLS видео с дополнительной логикой обработки"""
@@ -571,13 +579,16 @@ class HLSVideoField(VideoField):
 
     attr_class = HLSVideoFieldFile
 
-    def __init__(self, *args,
-                 hls_playlist_field: str | None = None,
-                 hls_base_subdir: str | None = None,
-                 ladder: list[dict] | None = None,
-                 segment_duration: int | None = None,
-                 hls_on_save: bool = True,
-                 **kwargs: Any):
+    def __init__(
+        self,
+        *args,
+        hls_playlist_field: str | None = None,
+        hls_base_subdir: str | None = None,
+        ladder: list[dict] | None = None,
+        segment_duration: int | None = None,
+        hls_on_save: bool = True,
+        **kwargs: Any,
+    ):
 
         # Инициализируем базовое VideoField
         super().__init__(*args, **kwargs)
@@ -625,25 +636,28 @@ class HLSVideoField(VideoField):
 
             if hasattr(build_hls_for_field, "delay"):
                 # Celery доступен - запускаем асинхронно
-                logger.info(f"Starting HLS transcoding (async) for {instance._meta.label}:{instance.pk}")
-                task = build_hls_for_field.delay(
-                    instance._meta.label,
-                    instance.pk,
-                    self.attname
+                logger.info(
+                    f"Starting HLS transcoding (async) for {instance._meta.label}:{instance.pk}"
                 )
+                task = build_hls_for_field.delay(instance._meta.label, instance.pk, self.attname)
 
                 # Сохраняем task ID если есть соответствующее поле
-                if hasattr(instance, 'hls_task_id'):
-                    setattr(instance, 'hls_task_id', task.id)
+                if hasattr(instance, "hls_task_id"):
+                    setattr(instance, "hls_task_id", task.id)
             else:
                 # Celery недоступен - запускаем синхронно
-                logger.info(f"Starting HLS transcoding (sync) for {instance._meta.label}:{instance.pk}")
+                logger.info(
+                    f"Starting HLS transcoding (sync) for {instance._meta.label}:{instance.pk}"
+                )
                 build_hls_for_field_sync(instance._meta.label, instance.pk, self.attname)
 
         except ImportError:
             # Модуль tasks не найден - используем синхронную функцию
             from .tasks import build_hls_for_field_sync
-            logger.info(f"Starting HLS transcoding (fallback) for {instance._meta.label}:{instance.pk}")
+
+            logger.info(
+                f"Starting HLS transcoding (fallback) for {instance._meta.label}:{instance.pk}"
+            )
             build_hls_for_field_sync(instance._meta.label, instance.pk, self.attname)
 
     def deconstruct(self):
@@ -651,15 +665,15 @@ class HLSVideoField(VideoField):
         name, path, args, kwargs = super().deconstruct()
 
         if self.hls_playlist_field is not None:
-            kwargs['hls_playlist_field'] = self.hls_playlist_field
+            kwargs["hls_playlist_field"] = self.hls_playlist_field
         if self.hls_base_subdir != defaults.HLS_SUBDIR:
-            kwargs['hls_base_subdir'] = self.hls_base_subdir
+            kwargs["hls_base_subdir"] = self.hls_base_subdir
         if self.ladder != defaults.DEFAULT_LADDER:
-            kwargs['ladder'] = self.ladder
+            kwargs["ladder"] = self.ladder
         if self.segment_duration != defaults.SEGMENT_DURATION:
-            kwargs['segment_duration'] = self.segment_duration
+            kwargs["segment_duration"] = self.segment_duration
         if not self.hls_on_save:
-            kwargs['hls_on_save'] = self.hls_on_save
+            kwargs["hls_on_save"] = self.hls_on_save
 
         return name, path, args, kwargs
 
@@ -667,6 +681,7 @@ class HLSVideoField(VideoField):
 # ==============================================================================
 # DASH VIDEO FIELD - DYNAMIC ADAPTIVE STREAMING
 # ==============================================================================
+
 
 class DASHVideoFieldFile(VideoFieldFile):
     """FieldFile для DASH видео"""
@@ -735,13 +750,16 @@ class DASHVideoField(VideoField):
 
     attr_class = DASHVideoFieldFile
 
-    def __init__(self, *args,
-                 dash_manifest_field: str | None = None,
-                 dash_base_subdir: str | None = None,
-                 ladder: list[dict] | None = None,
-                 segment_duration: int | None = None,
-                 dash_on_save: bool = True,
-                 **kwargs: Any):
+    def __init__(
+        self,
+        *args,
+        dash_manifest_field: str | None = None,
+        dash_base_subdir: str | None = None,
+        ladder: list[dict] | None = None,
+        segment_duration: int | None = None,
+        dash_on_save: bool = True,
+        **kwargs: Any,
+    ):
 
         super().__init__(*args, **kwargs)
 
@@ -778,21 +796,22 @@ class DASHVideoField(VideoField):
             from .tasks import build_dash_for_field, build_dash_for_field_sync
 
             if hasattr(build_dash_for_field, "delay"):
-                logger.info(f"Starting DASH transcoding (async) for {instance._meta.label}:{instance.pk}")
-                task = build_dash_for_field.delay(
-                    instance._meta.label,
-                    instance.pk,
-                    self.attname
+                logger.info(
+                    f"Starting DASH transcoding (async) for {instance._meta.label}:{instance.pk}"
                 )
+                task = build_dash_for_field.delay(instance._meta.label, instance.pk, self.attname)
 
-                if hasattr(instance, 'dash_task_id'):
-                    setattr(instance, 'dash_task_id', task.id)
+                if hasattr(instance, "dash_task_id"):
+                    setattr(instance, "dash_task_id", task.id)
             else:
-                logger.info(f"Starting DASH transcoding (sync) for {instance._meta.label}:{instance.pk}")
+                logger.info(
+                    f"Starting DASH transcoding (sync) for {instance._meta.label}:{instance.pk}"
+                )
                 build_dash_for_field_sync(instance._meta.label, instance.pk, self.attname)
 
         except ImportError:
             from .tasks import build_dash_for_field_sync
+
             build_dash_for_field_sync(instance._meta.label, instance.pk, self.attname)
 
     def deconstruct(self):
@@ -800,15 +819,15 @@ class DASHVideoField(VideoField):
         name, path, args, kwargs = super().deconstruct()
 
         if self.dash_manifest_field is not None:
-            kwargs['dash_manifest_field'] = self.dash_manifest_field
+            kwargs["dash_manifest_field"] = self.dash_manifest_field
         if self.dash_base_subdir != defaults.DASH_SUBDIR:
-            kwargs['dash_base_subdir'] = self.dash_base_subdir
+            kwargs["dash_base_subdir"] = self.dash_base_subdir
         if self.ladder != defaults.DEFAULT_LADDER:
-            kwargs['ladder'] = self.ladder
+            kwargs["ladder"] = self.ladder
         if self.segment_duration != defaults.DASH_SEGMENT_DURATION:
-            kwargs['segment_duration'] = self.segment_duration
+            kwargs["segment_duration"] = self.segment_duration
         if not self.dash_on_save:
-            kwargs['dash_on_save'] = self.dash_on_save
+            kwargs["dash_on_save"] = self.dash_on_save
 
         return name, path, args, kwargs
 
@@ -816,6 +835,7 @@ class DASHVideoField(VideoField):
 # ==============================================================================
 # ADAPTIVE VIDEO FIELD - HLS + DASH COMBO
 # ==============================================================================
+
 
 class AdaptiveVideoFieldFile(VideoFieldFile):
     """FieldFile для комбинированного HLS+DASH поля"""
@@ -897,14 +917,17 @@ class AdaptiveVideoField(VideoField):
 
     attr_class = AdaptiveVideoFieldFile
 
-    def __init__(self, *args,
-                 hls_playlist_field: str | None = None,
-                 dash_manifest_field: str | None = None,
-                 adaptive_base_subdir: str | None = None,
-                 ladder: list[dict] | None = None,
-                 segment_duration: int | None = None,
-                 adaptive_on_save: bool = True,
-                 **kwargs: Any):
+    def __init__(
+        self,
+        *args,
+        hls_playlist_field: str | None = None,
+        dash_manifest_field: str | None = None,
+        adaptive_base_subdir: str | None = None,
+        ladder: list[dict] | None = None,
+        segment_duration: int | None = None,
+        adaptive_on_save: bool = True,
+        **kwargs: Any,
+    ):
 
         super().__init__(*args, **kwargs)
 
@@ -942,21 +965,24 @@ class AdaptiveVideoField(VideoField):
             from .tasks import build_adaptive_for_field, build_adaptive_for_field_sync
 
             if hasattr(build_adaptive_for_field, "delay"):
-                logger.info(f"Starting adaptive transcoding (async) for {instance._meta.label}:{instance.pk}")
+                logger.info(
+                    f"Starting adaptive transcoding (async) for {instance._meta.label}:{instance.pk}"
+                )
                 task = build_adaptive_for_field.delay(
-                    instance._meta.label,
-                    instance.pk,
-                    self.attname
+                    instance._meta.label, instance.pk, self.attname
                 )
 
-                if hasattr(instance, 'adaptive_task_id'):
-                    setattr(instance, 'adaptive_task_id', task.id)
+                if hasattr(instance, "adaptive_task_id"):
+                    setattr(instance, "adaptive_task_id", task.id)
             else:
-                logger.info(f"Starting adaptive transcoding (sync) for {instance._meta.label}:{instance.pk}")
+                logger.info(
+                    f"Starting adaptive transcoding (sync) for {instance._meta.label}:{instance.pk}"
+                )
                 build_adaptive_for_field_sync(instance._meta.label, instance.pk, self.attname)
 
         except ImportError:
             from .tasks import build_adaptive_for_field_sync
+
             build_adaptive_for_field_sync(instance._meta.label, instance.pk, self.attname)
 
     def deconstruct(self):
@@ -964,17 +990,17 @@ class AdaptiveVideoField(VideoField):
         name, path, args, kwargs = super().deconstruct()
 
         if self.hls_playlist_field is not None:
-            kwargs['hls_playlist_field'] = self.hls_playlist_field
+            kwargs["hls_playlist_field"] = self.hls_playlist_field
         if self.dash_manifest_field is not None:
-            kwargs['dash_manifest_field'] = self.dash_manifest_field
+            kwargs["dash_manifest_field"] = self.dash_manifest_field
         if self.adaptive_base_subdir != defaults.ADAPTIVE_SUBDIR:
-            kwargs['adaptive_base_subdir'] = self.adaptive_base_subdir
+            kwargs["adaptive_base_subdir"] = self.adaptive_base_subdir
         if self.ladder != defaults.DEFAULT_LADDER:
-            kwargs['ladder'] = self.ladder
+            kwargs["ladder"] = self.ladder
         if self.segment_duration != defaults.SEGMENT_DURATION:
-            kwargs['segment_duration'] = self.segment_duration
+            kwargs["segment_duration"] = self.segment_duration
         if not self.adaptive_on_save:
-            kwargs['adaptive_on_save'] = self.adaptive_on_save
+            kwargs["adaptive_on_save"] = self.adaptive_on_save
 
         return name, path, args, kwargs
 
@@ -982,6 +1008,7 @@ class AdaptiveVideoField(VideoField):
 # ==============================================================================
 # УТИЛИТЫ И ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==============================================================================
+
 
 def validate_ladder(ladder: list[dict]) -> bool:
     """
@@ -1005,7 +1032,7 @@ def validate_ladder(ladder: list[dict]) -> bool:
             raise ValueError(f"Ladder rung {i} must be a dictionary")
 
         # Проверяем обязательные поля
-        required_fields = ['height', 'v_bitrate', 'a_bitrate']
+        required_fields = ["height", "v_bitrate", "a_bitrate"]
         for field in required_fields:
             if field not in rung:
                 raise ValueError(f"Ladder rung {i} missing required field: {field}")
@@ -1018,9 +1045,9 @@ def validate_ladder(ladder: list[dict]) -> bool:
                 raise ValueError(f"Ladder rung {i} field {field} must be a positive integer")
 
         # Проверяем разумные пределы
-        height = int(rung['height'])
-        v_bitrate = int(rung['v_bitrate'])
-        a_bitrate = int(rung['a_bitrate'])
+        height = int(rung["height"])
+        v_bitrate = int(rung["v_bitrate"])
+        a_bitrate = int(rung["a_bitrate"])
 
         if not (144 <= height <= 8192):
             raise ValueError(f"Height {height} out of range (144-8192)")
@@ -1061,28 +1088,30 @@ def get_optimal_ladder_for_resolution(source_width: int, source_height: int) -> 
     filtered_ladder = []
 
     for rung in base_ladder:
-        if rung['height'] <= source_height * 1.1:  # +10% запас
+        if rung["height"] <= source_height * 1.1:  # +10% запас
             filtered_ladder.append(rung.copy())
         else:
             break
 
     # Если исходное видео очень маленькое - добавляем хотя бы одно качество
     if not filtered_ladder:
-        min_rung = min(base_ladder, key=lambda x: x['height'])
+        min_rung = min(base_ladder, key=lambda x: x["height"])
         filtered_ladder.append(min_rung)
 
     # Добавляем исходное разрешение как максимальное качество
-    if filtered_ladder[-1]['height'] < source_height:
+    if filtered_ladder[-1]["height"] < source_height:
         # Оцениваем битрейт для исходного разрешения
         pixels_ratio = (source_width * source_height) / (1920 * 1080)  # относительно 1080p
         estimated_bitrate = int(4500 * pixels_ratio)  # базируясь на 1080p = 4500kbps
         estimated_bitrate = max(500, min(estimated_bitrate, 50000))  # 500kbps - 50Mbps
 
-        filtered_ladder.append({
-            "height": source_height,
-            "v_bitrate": estimated_bitrate,
-            "a_bitrate": 160 if source_height >= 720 else 128
-        })
+        filtered_ladder.append(
+            {
+                "height": source_height,
+                "v_bitrate": estimated_bitrate,
+                "a_bitrate": 160 if source_height >= 720 else 128,
+            }
+        )
 
     return filtered_ladder
 
@@ -1092,14 +1121,14 @@ def get_optimal_ladder_for_resolution(source_width: int, source_height: int) -> 
 # ==============================================================================
 
 __all__ = [
-    'VideoField',
-    'VideoFieldFile',
-    'HLSVideoField',
-    'HLSVideoFieldFile',
-    'DASHVideoField',
-    'DASHVideoFieldFile',
-    'AdaptiveVideoField',
-    'AdaptiveVideoFieldFile',
-    'validate_ladder',
-    'get_optimal_ladder_for_resolution',
+    "VideoField",
+    "VideoFieldFile",
+    "HLSVideoField",
+    "HLSVideoFieldFile",
+    "DASHVideoField",
+    "DASHVideoFieldFile",
+    "AdaptiveVideoField",
+    "AdaptiveVideoFieldFile",
+    "validate_ladder",
+    "get_optimal_ladder_for_resolution",
 ]

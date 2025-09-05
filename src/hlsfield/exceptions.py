@@ -17,6 +17,7 @@ from typing import List, Optional, Any, Dict
 # БАЗОВОЕ ИСКЛЮЧЕНИЕ
 # ==============================================================================
 
+
 class HLSFieldError(Exception):
     """
     Базовое исключение для всех ошибок django-hlsfield.
@@ -25,8 +26,12 @@ class HLSFieldError(Exception):
     Содержит дополнительную информацию для debugging и monitoring.
     """
 
-    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None,
-                 suggestions: Optional[List[str]] = None):
+    def __init__(
+        self,
+        message: str,
+        details: Optional[Dict[str, Any]] = None,
+        suggestions: Optional[List[str]] = None,
+    ):
         """
         Args:
             message: Основное сообщение об ошибке
@@ -53,16 +58,17 @@ class HLSFieldError(Exception):
     def to_dict(self) -> Dict[str, Any]:
         """Возвращает структурированное представление ошибки"""
         return {
-            'error_type': self.__class__.__name__,
-            'message': self.message,
-            'details': self.details,
-            'suggestions': self.suggestions
+            "error_type": self.__class__.__name__,
+            "message": self.message,
+            "details": self.details,
+            "suggestions": self.suggestions,
         }
 
 
 # ==============================================================================
 # ОШИБКИ FFMPEG
 # ==============================================================================
+
 
 class FFmpegNotFoundError(HLSFieldError):
     """
@@ -80,13 +86,10 @@ class FFmpegNotFoundError(HLSFieldError):
             "Install FFmpeg: https://ffmpeg.org/download.html",
             f"Set HLSFIELD_FFMPEG and HLSFIELD_FFPROBE in Django settings",
             "Verify FFmpeg installation with: ffmpeg -version",
-            "Check system PATH includes FFmpeg directory"
+            "Check system PATH includes FFmpeg directory",
         ]
 
-        details = {
-            'binary_name': binary_name,
-            'error_category': 'system_configuration'
-        }
+        details = {"binary_name": binary_name, "error_category": "system_configuration"}
 
         super().__init__(message, details, suggestions)
 
@@ -98,23 +101,22 @@ class FFmpegError(HLSFieldError):
     Содержит детальную информацию о команде, коде возврата и output.
     """
 
-    def __init__(self, command: List[str], returncode: int,
-                 stdout: str = "", stderr: str = ""):
+    def __init__(self, command: List[str], returncode: int, stdout: str = "", stderr: str = ""):
 
         self.command = command
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
 
-        command_str = ' '.join(command)
+        command_str = " ".join(command)
         message = f"FFmpeg command failed with code {returncode}: {command_str}"
 
         details = {
-            'command': command,
-            'returncode': returncode,
-            'stdout': stdout[:500],  # Ограничиваем для readability
-            'stderr': stderr[:500],
-            'error_category': 'ffmpeg_execution'
+            "command": command,
+            "returncode": returncode,
+            "stdout": stdout[:500],  # Ограничиваем для readability
+            "stderr": stderr[:500],
+            "error_category": "ffmpeg_execution",
         }
 
         suggestions = self._generate_suggestions()
@@ -128,39 +130,49 @@ class FFmpegError(HLSFieldError):
         stderr_lower = self.stderr.lower()
 
         if "no such file" in stderr_lower:
-            suggestions.extend([
-                "Check input file path exists and is readable",
-                "Verify file permissions",
-                "Use absolute file path"
-            ])
+            suggestions.extend(
+                [
+                    "Check input file path exists and is readable",
+                    "Verify file permissions",
+                    "Use absolute file path",
+                ]
+            )
 
         elif "invalid data found" in stderr_lower:
-            suggestions.extend([
-                "Input file may be corrupted",
-                "Try with a different video file",
-                "Check file was fully uploaded"
-            ])
+            suggestions.extend(
+                [
+                    "Input file may be corrupted",
+                    "Try with a different video file",
+                    "Check file was fully uploaded",
+                ]
+            )
 
         elif "permission denied" in stderr_lower:
-            suggestions.extend([
-                "Check file and directory permissions",
-                "Run with appropriate user privileges",
-                "Verify storage write permissions"
-            ])
+            suggestions.extend(
+                [
+                    "Check file and directory permissions",
+                    "Run with appropriate user privileges",
+                    "Verify storage write permissions",
+                ]
+            )
 
         elif "no space left" in stderr_lower:
-            suggestions.extend([
-                "Free up disk space",
-                "Check temporary directory has sufficient space",
-                "Consider using different storage location"
-            ])
+            suggestions.extend(
+                [
+                    "Free up disk space",
+                    "Check temporary directory has sufficient space",
+                    "Consider using different storage location",
+                ]
+            )
 
         elif "unknown encoder" in stderr_lower:
-            suggestions.extend([
-                "Check FFmpeg was compiled with required encoders",
-                "Install FFmpeg with libx264 support",
-                "Update FFmpeg to newer version"
-            ])
+            suggestions.extend(
+                [
+                    "Check FFmpeg was compiled with required encoders",
+                    "Install FFmpeg with libx264 support",
+                    "Update FFmpeg to newer version",
+                ]
+            )
 
         if not suggestions:
             suggestions.append("Check FFmpeg documentation for this error")
@@ -182,7 +194,7 @@ class FFmpegTimeoutError(FFmpegError):
             f"Increase timeout (current: {timeout_seconds}s)",
             "Check if input video is very long or high resolution",
             "Consider using faster FFmpeg preset",
-            "Monitor system resources during transcoding"
+            "Monitor system resources during transcoding",
         ]
 
 
@@ -190,28 +202,33 @@ class FFmpegTimeoutError(FFmpegError):
 # ОШИБКИ ВИДЕОФАЙЛОВ
 # ==============================================================================
 
+
 class InvalidVideoError(HLSFieldError):
     """
     Недопустимый, поврежденный или неподдерживаемый видеофайл.
     """
 
-    def __init__(self, message: str, file_path: Optional[str] = None,
-                 file_info: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        message: str,
+        file_path: Optional[str] = None,
+        file_info: Optional[Dict[str, Any]] = None,
+    ):
 
         self.file_path = file_path
         self.file_info = file_info or {}
 
         details = {
-            'file_path': file_path,
-            'file_info': file_info,
-            'error_category': 'video_validation'
+            "file_path": file_path,
+            "file_info": file_info,
+            "error_category": "video_validation",
         }
 
         suggestions = [
             "Try with a different video file",
             "Check file was fully uploaded and not truncated",
             "Verify file format is supported (MP4, AVI, MOV, etc.)",
-            "Use FFmpeg to validate file: ffprobe your_file.mp4"
+            "Use FFmpeg to validate file: ffprobe your_file.mp4",
         ]
 
         super().__init__(message, details, suggestions)
@@ -225,7 +242,7 @@ class UnsupportedFormatError(InvalidVideoError):
 
         message = f"Unsupported video format: {format_name}"
 
-        file_info = {'detected_format': format_name}
+        file_info = {"detected_format": format_name}
 
         super().__init__(message, file_path, file_info)
 
@@ -233,7 +250,7 @@ class UnsupportedFormatError(InvalidVideoError):
             "Convert video to supported format (MP4, MOV, AVI)",
             "Use FFmpeg to convert: ffmpeg -i input.{format_name} output.mp4",
             "Check HLSFIELD_ALLOWED_EXTENSIONS setting",
-            f"Current format '{format_name}' not in allowed list"
+            f"Current format '{format_name}' not in allowed list",
         ]
 
 
@@ -250,10 +267,10 @@ class VideoTooLargeError(InvalidVideoError):
         message = f"Video file too large: {size_mb:.1f}MB (max: {max_mb:.1f}MB)"
 
         file_info = {
-            'size_bytes': file_size,
-            'size_mb': size_mb,
-            'max_size_bytes': max_size,
-            'max_size_mb': max_mb
+            "size_bytes": file_size,
+            "size_mb": size_mb,
+            "max_size_bytes": max_size,
+            "max_size_mb": max_mb,
         }
 
         super().__init__(message, file_path, file_info)
@@ -262,7 +279,7 @@ class VideoTooLargeError(InvalidVideoError):
             f"Compress video to under {max_mb:.0f}MB",
             "Reduce video bitrate or resolution",
             "Split video into smaller segments",
-            "Increase HLSFIELD_MAX_FILE_SIZE setting if needed"
+            "Increase HLSFIELD_MAX_FILE_SIZE setting if needed",
         ]
 
 
@@ -275,10 +292,7 @@ class VideoTooShortError(InvalidVideoError):
 
         message = f"Video too short: {duration:.1f}s (minimum: {min_duration:.1f}s)"
 
-        file_info = {
-            'duration_seconds': duration,
-            'min_duration_seconds': min_duration
-        }
+        file_info = {"duration_seconds": duration, "min_duration_seconds": min_duration}
 
         super().__init__(message, None, file_info)
 
@@ -287,28 +301,30 @@ class VideoTooShortError(InvalidVideoError):
 # ОШИБКИ ТРАНСКОДИНГА
 # ==============================================================================
 
+
 class TranscodingError(HLSFieldError):
     """
     Общие ошибки процесса транскодинга видео.
     """
 
-    def __init__(self, message: str, stage: Optional[str] = None,
-                 original_error: Optional[Exception] = None):
+    def __init__(
+        self, message: str, stage: Optional[str] = None, original_error: Optional[Exception] = None
+    ):
 
         self.stage = stage
         self.original_error = original_error
 
         details = {
-            'transcoding_stage': stage,
-            'original_error': str(original_error) if original_error else None,
-            'error_category': 'transcoding'
+            "transcoding_stage": stage,
+            "original_error": str(original_error) if original_error else None,
+            "error_category": "transcoding",
         }
 
         suggestions = [
             "Check system has sufficient CPU and memory",
             "Verify temporary storage has enough space",
             "Try with a simpler quality ladder",
-            "Check FFmpeg logs for detailed error info"
+            "Check FFmpeg logs for detailed error info",
         ]
 
         if stage:
@@ -320,23 +336,24 @@ class TranscodingError(HLSFieldError):
 class HLSTranscodingError(TranscodingError):
     """Ошибки при создании HLS стрима"""
 
-    def __init__(self, message: str, variant_height: Optional[int] = None,
-                 segments_created: int = 0):
+    def __init__(
+        self, message: str, variant_height: Optional[int] = None, segments_created: int = 0
+    ):
 
         self.variant_height = variant_height
         self.segments_created = segments_created
 
         details = {
-            'variant_height': variant_height,
-            'segments_created': segments_created,
-            'transcoding_type': 'HLS'
+            "variant_height": variant_height,
+            "segments_created": segments_created,
+            "transcoding_type": "HLS",
         }
 
         suggestions = [
             "Check HLS segment duration is reasonable (2-10 seconds)",
             "Verify output directory is writable",
             "Try with fewer quality variants",
-            "Check source video is not corrupted"
+            "Check source video is not corrupted",
         ]
 
         if variant_height:
@@ -352,16 +369,13 @@ class DASHTranscodingError(TranscodingError):
     def __init__(self, message: str, representations_created: int = 0):
         self.representations_created = representations_created
 
-        details = {
-            'representations_created': representations_created,
-            'transcoding_type': 'DASH'
-        }
+        details = {"representations_created": representations_created, "transcoding_type": "DASH"}
 
         suggestions = [
             "Check DASH segment settings are valid",
             "Verify manifest template configuration",
             "Try shorter segment duration (2-4 seconds)",
-            "Check FFmpeg DASH support is available"
+            "Check FFmpeg DASH support is available",
         ]
 
         super().__init__(message, "DASH_transcoding", None)
@@ -372,43 +386,53 @@ class DASHTranscodingError(TranscodingError):
 # ОШИБКИ STORAGE
 # ==============================================================================
 
+
 class StorageError(HLSFieldError):
     """
     Ошибки при работе с файловым хранилищем.
     """
 
-    def __init__(self, message: str, operation: Optional[str] = None,
-                 file_path: Optional[str] = None, storage_backend: Optional[str] = None):
+    def __init__(
+        self,
+        message: str,
+        operation: Optional[str] = None,
+        file_path: Optional[str] = None,
+        storage_backend: Optional[str] = None,
+    ):
 
         self.operation = operation
         self.file_path = file_path
         self.storage_backend = storage_backend
 
         details = {
-            'operation': operation,
-            'file_path': file_path,
-            'storage_backend': storage_backend,
-            'error_category': 'storage'
+            "operation": operation,
+            "file_path": file_path,
+            "storage_backend": storage_backend,
+            "error_category": "storage",
         }
 
         suggestions = [
             "Check file and directory permissions",
             "Verify storage backend configuration",
-            "Ensure sufficient storage space available"
+            "Ensure sufficient storage space available",
         ]
 
-        if operation == 'upload':
-            suggestions.extend([
-                "Check network connectivity for cloud storage",
-                "Verify authentication credentials",
-                "Try uploading smaller test file"
-            ])
-        elif operation == 'download':
-            suggestions.extend([
-                "Verify file exists in storage",
-                "Check read permissions",
-                "Confirm storage backend is accessible"
-            ])
+        if operation == "upload":
+            suggestions.extend(
+                [
+                    "Check network connectivity for cloud storage",
+                    "Verify authentication credentials",
+                    "Try uploading smaller test file",
+                ]
+            )
+        elif operation == "download":
+            suggestions.extend(
+                [
+                    "Verify file exists in storage",
+                    "Check read permissions",
+                    "Confirm storage backend is accessible",
+                ]
+            )
 
         super().__init__(message, details, suggestions)
 
@@ -416,35 +440,40 @@ class StorageError(HLSFieldError):
 class S3StorageError(StorageError):
     """Специфичные ошибки AWS S3 storage"""
 
-    def __init__(self, message: str, bucket: Optional[str] = None,
-                 key: Optional[str] = None, aws_error_code: Optional[str] = None):
+    def __init__(
+        self,
+        message: str,
+        bucket: Optional[str] = None,
+        key: Optional[str] = None,
+        aws_error_code: Optional[str] = None,
+    ):
 
         self.bucket = bucket
         self.key = key
         self.aws_error_code = aws_error_code
 
         details = {
-            'bucket': bucket,
-            'key': key,
-            'aws_error_code': aws_error_code,
-            'storage_type': 'S3'
+            "bucket": bucket,
+            "key": key,
+            "aws_error_code": aws_error_code,
+            "storage_type": "S3",
         }
 
         suggestions = [
             "Check AWS credentials (ACCESS_KEY_ID, SECRET_ACCESS_KEY)",
             "Verify S3 bucket exists and is accessible",
             "Check S3 bucket permissions and policies",
-            "Confirm AWS region is correct"
+            "Confirm AWS region is correct",
         ]
 
-        if aws_error_code == 'NoSuchBucket':
+        if aws_error_code == "NoSuchBucket":
             suggestions.insert(0, f"S3 bucket '{bucket}' does not exist")
-        elif aws_error_code == 'AccessDenied':
+        elif aws_error_code == "AccessDenied":
             suggestions.insert(0, "S3 access denied - check IAM permissions")
-        elif aws_error_code == 'NoSuchKey':
+        elif aws_error_code == "NoSuchKey":
             suggestions.insert(0, f"S3 object '{key}' not found")
 
-        super().__init__(message, None, key, 'S3')
+        super().__init__(message, None, key, "S3")
         self.details.update(details)
 
 
@@ -452,30 +481,36 @@ class S3StorageError(StorageError):
 # ОШИБКИ КОНФИГУРАЦИИ
 # ==============================================================================
 
+
 class ConfigurationError(HLSFieldError):
     """
     Ошибки конфигурации django-hlsfield.
     """
 
-    def __init__(self, message: str, setting_name: Optional[str] = None,
-                 current_value: Optional[Any] = None, expected_type: Optional[str] = None):
+    def __init__(
+        self,
+        message: str,
+        setting_name: Optional[str] = None,
+        current_value: Optional[Any] = None,
+        expected_type: Optional[str] = None,
+    ):
 
         self.setting_name = setting_name
         self.current_value = current_value
         self.expected_type = expected_type
 
         details = {
-            'setting_name': setting_name,
-            'current_value': current_value,
-            'expected_type': expected_type,
-            'error_category': 'configuration'
+            "setting_name": setting_name,
+            "current_value": current_value,
+            "expected_type": expected_type,
+            "error_category": "configuration",
         }
 
         suggestions = [
             "Check Django settings.py configuration",
             "Verify HLSFIELD_* settings are correct",
             "Run: python manage.py hlsfield_health_check",
-            "Review django-hlsfield documentation"
+            "Review django-hlsfield documentation",
         ]
 
         if setting_name:
@@ -487,23 +522,24 @@ class ConfigurationError(HLSFieldError):
 class InvalidLadderError(ConfigurationError):
     """Некорректная конфигурация лестницы качеств"""
 
-    def __init__(self, message: str, ladder: Optional[List[Dict]] = None,
-                 rung_index: Optional[int] = None):
+    def __init__(
+        self, message: str, ladder: Optional[List[Dict]] = None, rung_index: Optional[int] = None
+    ):
 
         self.ladder = ladder
         self.rung_index = rung_index
 
         details = {
-            'ladder_length': len(ladder) if ladder else 0,
-            'invalid_rung_index': rung_index,
-            'setting_type': 'quality_ladder'
+            "ladder_length": len(ladder) if ladder else 0,
+            "invalid_rung_index": rung_index,
+            "setting_type": "quality_ladder",
         }
 
         suggestions = [
             "Check ladder format: [{'height': 720, 'v_bitrate': 2500, 'a_bitrate': 128}, ...]",
             "Verify all ladder rungs have required fields",
             "Ensure bitrates and heights are positive integers",
-            "Remove duplicate height values from ladder"
+            "Remove duplicate height values from ladder",
         ]
 
         if rung_index is not None:
@@ -517,30 +553,36 @@ class InvalidLadderError(ConfigurationError):
 # ОШИБКИ CELERY/ЗАДАЧ
 # ==============================================================================
 
+
 class TaskError(HLSFieldError):
     """
     Ошибки выполнения фоновых задач.
     """
 
-    def __init__(self, message: str, task_name: Optional[str] = None,
-                 task_id: Optional[str] = None, retry_count: int = 0):
+    def __init__(
+        self,
+        message: str,
+        task_name: Optional[str] = None,
+        task_id: Optional[str] = None,
+        retry_count: int = 0,
+    ):
 
         self.task_name = task_name
         self.task_id = task_id
         self.retry_count = retry_count
 
         details = {
-            'task_name': task_name,
-            'task_id': task_id,
-            'retry_count': retry_count,
-            'error_category': 'task_execution'
+            "task_name": task_name,
+            "task_id": task_id,
+            "retry_count": retry_count,
+            "error_category": "task_execution",
         }
 
         suggestions = [
             "Check Celery worker is running",
             "Verify Redis/broker connectivity",
             "Monitor system resources (CPU, memory, disk)",
-            "Check task logs for detailed errors"
+            "Check task logs for detailed errors",
         ]
 
         if retry_count > 0:
@@ -559,10 +601,10 @@ class CeleryNotAvailableError(TaskError):
             "Install Celery: pip install celery",
             "Configure Celery in Django settings",
             "Start Celery worker: celery -A myproject worker",
-            "Synchronous processing will continue but may be slow"
+            "Synchronous processing will continue but may be slow",
         ]
 
-        details = {'fallback_mode': 'synchronous'}
+        details = {"fallback_mode": "synchronous"}
 
         super().__init__(message, None, None, 0)
         self.details.update(details)
@@ -572,21 +614,26 @@ class CeleryNotAvailableError(TaskError):
 # ОШИБКИ ВАЛИДАЦИИ
 # ==============================================================================
 
+
 class ValidationError(HLSFieldError):
     """
     Ошибки валидации входных данных.
     """
 
-    def __init__(self, message: str, field_name: Optional[str] = None,
-                 validation_errors: Optional[List[str]] = None):
+    def __init__(
+        self,
+        message: str,
+        field_name: Optional[str] = None,
+        validation_errors: Optional[List[str]] = None,
+    ):
 
         self.field_name = field_name
         self.validation_errors = validation_errors or []
 
         details = {
-            'field_name': field_name,
-            'validation_errors': validation_errors,
-            'error_category': 'validation'
+            "field_name": field_name,
+            "validation_errors": validation_errors,
+            "error_category": "validation",
         }
 
         suggestions = []
@@ -602,6 +649,7 @@ class ValidationError(HLSFieldError):
 # NETWORK И TIMEOUT ОШИБКИ
 # ==============================================================================
 
+
 class TimeoutError(HLSFieldError):
     """Операция превысила таймаут"""
 
@@ -610,15 +658,15 @@ class TimeoutError(HLSFieldError):
         self.operation = operation
 
         details = {
-            'timeout_seconds': timeout_seconds,
-            'operation': operation,
-            'error_category': 'timeout'
+            "timeout_seconds": timeout_seconds,
+            "operation": operation,
+            "error_category": "timeout",
         }
 
         suggestions = [
             f"Increase timeout (current: {timeout_seconds}s)",
             "Check if operation is appropriate for timeout duration",
-            "Monitor system performance during operation"
+            "Monitor system performance during operation",
         ]
 
         if operation:
@@ -630,21 +678,16 @@ class TimeoutError(HLSFieldError):
 class NetworkError(HLSFieldError):
     """Сетевые ошибки при работе с удаленными ресурсами"""
 
-    def __init__(self, message: str, url: Optional[str] = None,
-                 status_code: Optional[int] = None):
+    def __init__(self, message: str, url: Optional[str] = None, status_code: Optional[int] = None):
         self.url = url
         self.status_code = status_code
 
-        details = {
-            'url': url,
-            'status_code': status_code,
-            'error_category': 'network'
-        }
+        details = {"url": url, "status_code": status_code, "error_category": "network"}
 
         suggestions = [
             "Check network connectivity",
             "Verify URL is accessible",
-            "Check firewall and proxy settings"
+            "Check firewall and proxy settings",
         ]
 
         if status_code:
@@ -662,6 +705,7 @@ class NetworkError(HLSFieldError):
 # УТИЛИТЫ ДЛЯ РАБОТЫ С ИСКЛЮЧЕНИЯМИ
 # ==============================================================================
 
+
 def categorize_exception(error: Exception) -> Dict[str, Any]:
     """
     Анализирует исключение и возвращает структурированную информацию.
@@ -678,35 +722,35 @@ def categorize_exception(error: Exception) -> Dict[str, Any]:
 
     # Для стандартных исключений Python
     error_info = {
-        'error_type': error.__class__.__name__,
-        'message': str(error),
-        'details': {},
-        'suggestions': []
+        "error_type": error.__class__.__name__,
+        "message": str(error),
+        "details": {},
+        "suggestions": [],
     }
 
     # Специальная обработка для некоторых стандартных исключений
     if isinstance(error, FileNotFoundError):
-        error_info['details']['error_category'] = 'file_system'
-        error_info['suggestions'] = [
+        error_info["details"]["error_category"] = "file_system"
+        error_info["suggestions"] = [
             "Check file path exists",
             "Verify file permissions",
-            "Ensure file was not moved or deleted"
+            "Ensure file was not moved or deleted",
         ]
 
     elif isinstance(error, PermissionError):
-        error_info['details']['error_category'] = 'permissions'
-        error_info['suggestions'] = [
+        error_info["details"]["error_category"] = "permissions"
+        error_info["suggestions"] = [
             "Check file and directory permissions",
             "Run with appropriate user privileges",
-            "Verify write access to destination"
+            "Verify write access to destination",
         ]
 
     elif isinstance(error, OSError):
-        error_info['details']['error_category'] = 'system'
-        error_info['suggestions'] = [
+        error_info["details"]["error_category"] = "system"
+        error_info["suggestions"] = [
             "Check system resources (disk space, memory)",
             "Verify system configuration",
-            "Check for hardware issues"
+            "Check for hardware issues",
         ]
 
     return error_info
@@ -739,7 +783,7 @@ def format_exception_for_user(error: Exception) -> str:
         PermissionError: "Недостаточно прав доступа. Проверьте разрешения.",
         OSError: "Системная ошибка. Проверьте ресурсы системы.",
         ValueError: "Некорректное значение. Проверьте входные данные.",
-        TypeError: "Неправильный тип данных. Проверьте формат данных."
+        TypeError: "Неправильный тип данных. Проверьте формат данных.",
     }
 
     return error_messages.get(type(error), f"Произошла ошибка: {str(error)}")
@@ -763,32 +807,23 @@ def is_retryable_error(error: Exception) -> bool:
         UnsupportedFormatError,
         VideoTooLargeError,
         ConfigurationError,
-        ValidationError
+        ValidationError,
     )
 
     if isinstance(error, non_retryable):
         return False
 
     # Ошибки которые можно повторить
-    retryable = (
-        NetworkError,
-        TimeoutError,
-        StorageError,
-        TaskError
-    )
+    retryable = (NetworkError, TimeoutError, StorageError, TaskError)
 
     if isinstance(error, retryable):
         return True
 
     # Для HLSFieldError проверяем категорию
     if isinstance(error, HLSFieldError):
-        error_category = error.details.get('error_category')
+        error_category = error.details.get("error_category")
 
-        non_retryable_categories = [
-            'video_validation',
-            'configuration',
-            'system_configuration'
-        ]
+        non_retryable_categories = ["video_validation", "configuration", "system_configuration"]
 
         return error_category not in non_retryable_categories
 
@@ -809,45 +844,36 @@ def is_retryable_error(error: Exception) -> bool:
 
 __all__ = [
     # Базовые
-    'HLSFieldError',
-
+    "HLSFieldError",
     # FFmpeg
-    'FFmpegNotFoundError',
-    'FFmpegError',
-    'FFmpegTimeoutError',
-
+    "FFmpegNotFoundError",
+    "FFmpegError",
+    "FFmpegTimeoutError",
     # Видео
-    'InvalidVideoError',
-    'UnsupportedFormatError',
-    'VideoTooLargeError',
-    'VideoTooShortError',
-
+    "InvalidVideoError",
+    "UnsupportedFormatError",
+    "VideoTooLargeError",
+    "VideoTooShortError",
     # Транскодинг
-    'TranscodingError',
-    'HLSTranscodingError',
-    'DASHTranscodingError',
-
+    "TranscodingError",
+    "HLSTranscodingError",
+    "DASHTranscodingError",
     # Storage
-    'StorageError',
-    'S3StorageError',
-
+    "StorageError",
+    "S3StorageError",
     # Конфигурация
-    'ConfigurationError',
-    'InvalidLadderError',
-
+    "ConfigurationError",
+    "InvalidLadderError",
     # Задачи
-    'TaskError',
-    'CeleryNotAvailableError',
-
+    "TaskError",
+    "CeleryNotAvailableError",
     # Валидация
-    'ValidationError',
-
+    "ValidationError",
     # Network
-    'TimeoutError',
-    'NetworkError',
-
+    "TimeoutError",
+    "NetworkError",
     # Утилиты
-    'categorize_exception',
-    'format_exception_for_user',
-    'is_retryable_error',
+    "categorize_exception",
+    "format_exception_for_user",
+    "is_retryable_error",
 ]

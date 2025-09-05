@@ -26,20 +26,23 @@ logger = logging.getLogger(__name__)
 # БЕЗОПАСНЫЙ ДОСТУП К DJANGO SETTINGS
 # ==============================================================================
 
+
 def _get_django_settings():
     """Безопасно получает объект Django settings"""
     from django.core.exceptions import ImproperlyConfigured
+
     try:
         import django
-        if not hasattr(django, 'apps') or not django.apps.apps.ready:
+
+        if not hasattr(django, "apps") or not django.apps.apps.ready:
             return None
 
         from django.conf import settings as django_settings
 
-        if not hasattr(django_settings, 'configured') or not django_settings.configured:
+        if not hasattr(django_settings, "configured") or not django_settings.configured:
             return None
 
-        getattr(django_settings, 'DEBUG', False)
+        getattr(django_settings, "DEBUG", False)
         return django_settings
     except (ImportError, ImproperlyConfigured, AttributeError):
         return None
@@ -72,13 +75,16 @@ FFMPEG_TIMEOUT = int(_get_setting("HLSFIELD_FFMPEG_TIMEOUT", 300))  # 5 мину
 # ЛЕСТНИЦЫ КАЧЕСТВ
 # ==============================================================================
 
-DEFAULT_LADDER = _get_setting("HLSFIELD_DEFAULT_LADDER", [
-    {"height": 240, "v_bitrate": 300, "a_bitrate": 64},
-    {"height": 360, "v_bitrate": 800, "a_bitrate": 96},
-    {"height": 480, "v_bitrate": 1200, "a_bitrate": 96},
-    {"height": 720, "v_bitrate": 2500, "a_bitrate": 128},
-    {"height": 1080, "v_bitrate": 4500, "a_bitrate": 160},
-])
+DEFAULT_LADDER = _get_setting(
+    "HLSFIELD_DEFAULT_LADDER",
+    [
+        {"height": 240, "v_bitrate": 300, "a_bitrate": 64},
+        {"height": 360, "v_bitrate": 800, "a_bitrate": 96},
+        {"height": 480, "v_bitrate": 1200, "a_bitrate": 96},
+        {"height": 720, "v_bitrate": 2500, "a_bitrate": 128},
+        {"height": 1080, "v_bitrate": 4500, "a_bitrate": 160},
+    ],
+)
 
 
 # ==============================================================================
@@ -131,24 +137,27 @@ EXTRACT_METADATA = bool(_get_setting("HLSFIELD_EXTRACT_METADATA", True))
 # ОГРАНИЧЕНИЯ И ВАЛИДАЦИЯ
 # ==============================================================================
 
-MAX_FILE_SIZE = int(_get_setting("HLSFIELD_MAX_FILE_SIZE", 2 * 1024 ** 3))  # 2GB
+MAX_FILE_SIZE = int(_get_setting("HLSFIELD_MAX_FILE_SIZE", 2 * 1024**3))  # 2GB
 MIN_FILE_SIZE = int(_get_setting("HLSFIELD_MIN_FILE_SIZE", 1000))  # 1KB
 
-ALLOWED_MIME_TYPES = _get_setting("HLSFIELD_ALLOWED_MIME_TYPES", [
-    'video/mp4',
-    'video/avi',
-    'video/mov',
-    'video/wmv',
-    'video/flv',
-    'video/webm',
-    'video/quicktime',
-    'video/x-msvideo',
-])
+ALLOWED_MIME_TYPES = _get_setting(
+    "HLSFIELD_ALLOWED_MIME_TYPES",
+    [
+        "video/mp4",
+        "video/avi",
+        "video/mov",
+        "video/wmv",
+        "video/flv",
+        "video/webm",
+        "video/quicktime",
+        "video/x-msvideo",
+    ],
+)
 
-ALLOWED_EXTENSIONS = _get_setting("HLSFIELD_ALLOWED_EXTENSIONS", [
-    '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv',
-    '.m4v', '.3gp', '.ogv'
-])
+ALLOWED_EXTENSIONS = _get_setting(
+    "HLSFIELD_ALLOWED_EXTENSIONS",
+    [".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm", ".mkv", ".m4v", ".3gp", ".ogv"],
+)
 
 MAX_VIDEO_HEIGHT = int(_get_setting("HLSFIELD_MAX_VIDEO_HEIGHT", 8192))
 MIN_VIDEO_HEIGHT = int(_get_setting("HLSFIELD_MIN_VIDEO_HEIGHT", 144))
@@ -193,14 +202,15 @@ FFMPEG_LOG_DIR = _get_setting("HLSFIELD_FFMPEG_LOG_DIR", "/tmp/hlsfield_logs")
 # КОНСТАНТЫ
 # ==============================================================================
 
-SUPPORTED_VIDEO_CODECS = ['h264', 'libx264', 'h265', 'libx265', 'vp8', 'vp9']
-SUPPORTED_AUDIO_CODECS = ['aac', 'mp3', 'opus']
-SUPPORTED_CONTAINERS = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv']
+SUPPORTED_VIDEO_CODECS = ["h264", "libx264", "h265", "libx265", "vp8", "vp9"]
+SUPPORTED_AUDIO_CODECS = ["aac", "mp3", "opus"]
+SUPPORTED_CONTAINERS = ["mp4", "mov", "avi", "mkv", "webm", "flv"]
 
 
 # ==============================================================================
 # RUNTIME ИНФОРМАЦИЯ (УПРОЩЕННАЯ)
 # ==============================================================================
+
 
 def get_runtime_info() -> dict:
     """Возвращает основную runtime информацию"""
@@ -212,20 +222,20 @@ def get_runtime_info() -> dict:
     django_settings = _get_django_settings()
 
     return {
-        'ffmpeg': {
-            'available': ffmpeg_available,
-            'path': FFMPEG,
+        "ffmpeg": {
+            "available": ffmpeg_available,
+            "path": FFMPEG,
         },
-        'processing': {
-            'ladder_count': len(DEFAULT_LADDER),
-            'segment_duration': SEGMENT_DURATION,
-            'max_file_size_mb': MAX_FILE_SIZE // (1024 * 1024),
+        "processing": {
+            "ladder_count": len(DEFAULT_LADDER),
+            "segment_duration": SEGMENT_DURATION,
+            "max_file_size_mb": MAX_FILE_SIZE // (1024 * 1024),
         },
-        'django': {
-            'configured': django_settings is not None,
-            'settings_module': os.environ.get('DJANGO_SETTINGS_MODULE'),
+        "django": {
+            "configured": django_settings is not None,
+            "settings_module": os.environ.get("DJANGO_SETTINGS_MODULE"),
         },
-        'python_version': sys.version.split()[0],
+        "python_version": sys.version.split()[0],
     }
 
 
@@ -234,6 +244,7 @@ def validate_settings() -> list[str]:
     issues = []
 
     import shutil
+
     if not shutil.which(FFMPEG):
         issues.append(f"FFmpeg not found at '{FFMPEG}'")
 
@@ -256,9 +267,10 @@ def validate_settings() -> list[str]:
 # НАСТРОЙКА ЛОГИРОВАНИЯ
 # ==============================================================================
 
+
 def setup_logging():
     """Настраивает базовое логирование"""
-    logger = logging.getLogger('hlsfield')
+    logger = logging.getLogger("hlsfield")
 
     if VERBOSE_LOGGING:
         logger.setLevel(logging.DEBUG)
@@ -267,9 +279,7 @@ def setup_logging():
 
     if not logger.handlers:
         handler = logging.StreamHandler()
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
+        formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
         handler.setFormatter(formatter)
         logger.addHandler(handler)
 

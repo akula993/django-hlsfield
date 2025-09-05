@@ -3,20 +3,18 @@ Enhanced streaming server с поддержкой range requests,
 защитой контента и оптимизацией доставки
 """
 
+import hashlib
 import os
 import re
-import hashlib
 import time
-from typing import Optional, Tuple
 from pathlib import Path
+from typing import Optional, Tuple
 
-from django.http import HttpResponse, StreamingHttpResponse, Http404
-from django.views import View
-from django.views.decorators.cache import cache_control
-from django.utils.decorators import method_decorator
-from django.core.cache import cache
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.cache import cache
+from django.http import HttpResponse, StreamingHttpResponse, Http404
+from django.views import View
 
 
 class RangeFileWrapper:
@@ -69,10 +67,10 @@ class SecureStreamingView(View):
     """
 
     # Настройки безопасности
-    ENABLE_TOKEN_AUTH = getattr(settings, 'HLSFIELD_SECURE_STREAMING', False)
-    TOKEN_EXPIRY = getattr(settings, 'HLSFIELD_TOKEN_EXPIRY', 3600)  # 1 час
-    ENABLE_BANDWIDTH_LIMIT = getattr(settings, 'HLSFIELD_BANDWIDTH_LIMIT', False)
-    MAX_BANDWIDTH_MBPS = getattr(settings, 'HLSFIELD_MAX_BANDWIDTH_MBPS', 10)
+    ENABLE_TOKEN_AUTH = getattr(settings, "HLSFIELD_SECURE_STREAMING", False)
+    TOKEN_EXPIRY = getattr(settings, "HLSFIELD_TOKEN_EXPIRY", 3600)  # 1 час
+    ENABLE_BANDWIDTH_LIMIT = getattr(settings, "HLSFIELD_BANDWIDTH_LIMIT", False)
+    MAX_BANDWIDTH_MBPS = getattr(settings, "HLSFIELD_MAX_BANDWIDTH_MBPS", 10)
 
     def get(self, request, *args, **kwargs):
         """Обработка GET запроса для стриминга"""
@@ -81,7 +79,7 @@ class SecureStreamingView(View):
 
         # Проверка безопасности
         if not self.check_access(request, file_path):
-            return HttpResponse('Forbidden', status=403)
+            return HttpResponse("Forbidden", status=403)
 
         # Проверка существования файла
         if not os.path.exists(file_path):
@@ -91,7 +89,7 @@ class SecureStreamingView(View):
         content_type = self.get_content_type(file_path)
 
         # Обработка Range requests
-        range_header = request.META.get('HTTP_RANGE')
+        range_header = request.META.get("HTTP_RANGE")
 
         if range_header:
             return self.serve_range_request(request, file_path, content_type)
@@ -101,16 +99,16 @@ class SecureStreamingView(View):
     def get_file_path(self, request, *args, **kwargs) -> str:
         """Получает путь к файлу из запроса"""
         # Это нужно переопределить в наследниках
-        video_id = kwargs.get('video_id')
-        file_name = kwargs.get('file_name')
+        video_id = kwargs.get("video_id")
+        file_name = kwargs.get("file_name")
 
         # Базовая защита от path traversal
-        if '..' in file_name or file_name.startswith('/'):
+        if ".." in file_name or file_name.startswith("/"):
             raise Http404("Invalid file name")
 
         # Строим безопасный путь
         base_path = settings.MEDIA_ROOT
-        return os.path.join(base_path, 'videos', video_id, file_name)
+        return os.path.join(base_path, "videos", video_id, file_name)
 
     def check_access(self, request, file_path: str) -> bool:
         """Проверяет права доступа к файлу"""
@@ -119,7 +117,7 @@ class SecureStreamingView(View):
             return True
 
         # Проверяем токен
-        token = request.GET.get('token')
+        token = request.GET.get("token")
         if not token:
             return False
 
@@ -130,22 +128,21 @@ class SecureStreamingView(View):
         """Валидация токена доступа"""
 
         # Проверяем в кеше
-        cache_key = f'stream_token:{token}'
+        cache_key = f"stream_token:{token}"
         cached_data = cache.get(cache_key)
 
         if cached_data:
             # Токен валиден, проверяем соответствие файла
-            return cached_data.get('file_path') == file_path
+            return cached_data.get("file_path") == file_path
 
         # Генерируем ожидаемый токен
         expected_token = self.generate_token(file_path)
 
         if token == expected_token:
             # Сохраняем в кеш
-            cache.set(cache_key, {
-                'file_path': file_path,
-                'created_at': time.time()
-            }, self.TOKEN_EXPIRY)
+            cache.set(
+                cache_key, {"file_path": file_path, "created_at": time.time()}, self.TOKEN_EXPIRY
+            )
             return True
 
         return False
@@ -163,23 +160,23 @@ class SecureStreamingView(View):
         ext = Path(file_path).suffix.lower()
 
         mime_types = {
-            '.m3u8': 'application/vnd.apple.mpegurl',
-            '.mpd': 'application/dash+xml',
-            '.ts': 'video/MP2T',
-            '.m4s': 'video/iso.segment',
-            '.mp4': 'video/mp4',
-            '.webm': 'video/webm',
-            '.jpg': 'image/jpeg',
-            '.png': 'image/png',
-            '.vtt': 'text/vtt',
+            ".m3u8": "application/vnd.apple.mpegurl",
+            ".mpd": "application/dash+xml",
+            ".ts": "video/MP2T",
+            ".m4s": "video/iso.segment",
+            ".mp4": "video/mp4",
+            ".webm": "video/webm",
+            ".jpg": "image/jpeg",
+            ".png": "image/png",
+            ".vtt": "text/vtt",
         }
 
-        return mime_types.get(ext, 'application/octet-stream')
+        return mime_types.get(ext, "application/octet-stream")
 
     def parse_range_header(self, range_header: str, file_size: int) -> Optional[Tuple[int, int]]:
         """Парсит Range header и возвращает (start, end)"""
 
-        range_match = re.match(r'bytes=(\d+)-(\d*)', range_header)
+        range_match = re.match(r"bytes=(\d+)-(\d*)", range_header)
         if not range_match:
             return None
 
@@ -203,42 +200,37 @@ class SecureStreamingView(View):
         """Обслуживает Range request"""
 
         file_size = os.path.getsize(file_path)
-        range_header = request.META.get('HTTP_RANGE')
+        range_header = request.META.get("HTTP_RANGE")
 
         # Парсим range
         byte_range = self.parse_range_header(range_header, file_size)
 
         if not byte_range:
-            return HttpResponse('Invalid range', status=416)
+            return HttpResponse("Invalid range", status=416)
 
         start, end = byte_range
         length = end - start + 1
 
         # Открываем файл
-        file = open(file_path, 'rb')
+        file = open(file_path, "rb")
 
         # Создаем wrapper с поддержкой throttling если нужно
         if self.ENABLE_BANDWIDTH_LIMIT:
             wrapper = ThrottledFileWrapper(
-                file,
-                offset=start,
-                length=length,
-                max_bandwidth_mbps=self.MAX_BANDWIDTH_MBPS
+                file, offset=start, length=length, max_bandwidth_mbps=self.MAX_BANDWIDTH_MBPS
             )
         else:
             wrapper = RangeFileWrapper(file, offset=start, length=length)
 
         # Создаем response
         response = StreamingHttpResponse(
-            wrapper,
-            status=206,  # Partial Content
-            content_type=content_type
+            wrapper, status=206, content_type=content_type  # Partial Content
         )
 
         # Добавляем заголовки
-        response['Content-Range'] = f'bytes {start}-{end}/{file_size}'
-        response['Content-Length'] = str(length)
-        response['Accept-Ranges'] = 'bytes'
+        response["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+        response["Content-Length"] = str(length)
+        response["Accept-Ranges"] = "bytes"
 
         # Cache headers
         self.add_cache_headers(response, file_path)
@@ -252,24 +244,21 @@ class SecureStreamingView(View):
 
         # Для маленьких файлов (плейлисты, манифесты) отдаем целиком
         if file_size < 1024 * 1024:  # < 1MB
-            with open(file_path, 'rb') as f:
+            with open(file_path, "rb") as f:
                 response = HttpResponse(f.read(), content_type=content_type)
         else:
             # Для больших файлов используем streaming
-            file = open(file_path, 'rb')
+            file = open(file_path, "rb")
 
             if self.ENABLE_BANDWIDTH_LIMIT:
-                wrapper = ThrottledFileWrapper(
-                    file,
-                    max_bandwidth_mbps=self.MAX_BANDWIDTH_MBPS
-                )
+                wrapper = ThrottledFileWrapper(file, max_bandwidth_mbps=self.MAX_BANDWIDTH_MBPS)
             else:
                 wrapper = RangeFileWrapper(file)
 
             response = StreamingHttpResponse(wrapper, content_type=content_type)
 
-        response['Content-Length'] = str(file_size)
-        response['Accept-Ranges'] = 'bytes'
+        response["Content-Length"] = str(file_size)
+        response["Accept-Ranges"] = "bytes"
 
         # Cache headers
         self.add_cache_headers(response, file_path)
@@ -282,20 +271,20 @@ class SecureStreamingView(View):
         ext = Path(file_path).suffix.lower()
 
         # Различные стратегии кеширования для разных типов
-        if ext in ['.ts', '.m4s', '.mp4']:
+        if ext in [".ts", ".m4s", ".mp4"]:
             # Сегменты видео - долгое кеширование
-            response['Cache-Control'] = 'public, max-age=31536000, immutable'
-        elif ext in ['.m3u8', '.mpd']:
+            response["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif ext in [".m3u8", ".mpd"]:
             # Плейлисты - короткое кеширование
-            response['Cache-Control'] = 'public, max-age=60'
+            response["Cache-Control"] = "public, max-age=60"
         else:
             # По умолчанию
-            response['Cache-Control'] = 'public, max-age=3600'
+            response["Cache-Control"] = "public, max-age=3600"
 
         # ETag для проверки изменений
         mtime = os.path.getmtime(file_path)
         etag = f'"{hashlib.md5(f"{file_path}:{mtime}".encode()).hexdigest()}"'
-        response['ETag'] = etag
+        response["ETag"] = etag
 
 
 class ThrottledFileWrapper(RangeFileWrapper):
@@ -351,7 +340,7 @@ class ProtectedHLSView(LoginRequiredMixin, SecureStreamingView):
             return False
 
         # Проверяем права пользователя на конкретное видео
-        video_id = self.kwargs.get('video_id')
+        video_id = self.kwargs.get("video_id")
 
         # Здесь можно добавить проверку прав на конкретное видео
         # Например, проверить подписку или покупку
@@ -365,7 +354,7 @@ class ProtectedHLSView(LoginRequiredMixin, SecureStreamingView):
         from django.apps import apps
 
         try:
-            Video = apps.get_model('yourapp', 'Video')
+            Video = apps.get_model("yourapp", "Video")
             video = Video.objects.get(id=video_id)
 
             # Проверяем права
@@ -376,7 +365,7 @@ class ProtectedHLSView(LoginRequiredMixin, SecureStreamingView):
                 return True
 
             # Проверяем подписку/покупку
-            if hasattr(user, 'purchases'):
+            if hasattr(user, "purchases"):
                 return user.purchases.filter(video=video).exists()
 
         except Exception:
@@ -390,14 +379,15 @@ from django.urls import path
 
 urlpatterns = [
     # Публичный стриминг
-    path('stream/<str:video_id>/<path:file_name>/',
-         SecureStreamingView.as_view(),
-         name='stream_file'),
-
+    path(
+        "stream/<str:video_id>/<path:file_name>/", SecureStreamingView.as_view(), name="stream_file"
+    ),
     # Защищенный стриминг
-    path('protected/<str:video_id>/<path:file_name>/',
-         ProtectedHLSView.as_view(),
-         name='protected_stream'),
+    path(
+        "protected/<str:video_id>/<path:file_name>/",
+        ProtectedHLSView.as_view(),
+        name="protected_stream",
+    ),
 ]
 
 
@@ -415,10 +405,10 @@ class StreamingCORSMiddleware:
         response = self.get_response(request)
 
         # Добавляем CORS заголовки для streaming путей
-        if request.path.startswith('/stream/') or request.path.startswith('/protected/'):
-            response['Access-Control-Allow-Origin'] = '*'
-            response['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
-            response['Access-Control-Allow-Headers'] = 'Range, Accept-Encoding'
-            response['Access-Control-Expose-Headers'] = 'Content-Length, Content-Range'
+        if request.path.startswith("/stream/") or request.path.startswith("/protected/"):
+            response["Access-Control-Allow-Origin"] = "*"
+            response["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
+            response["Access-Control-Allow-Headers"] = "Range, Accept-Encoding"
+            response["Access-Control-Expose-Headers"] = "Content-Length, Content-Range"
 
         return response
