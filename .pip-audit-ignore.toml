@@ -6,10 +6,6 @@ ignore-packages = [
     "django-hlsfield"  # Локальный dev пакет, не на PyPI
 ]
 
-# Игнорируем ложные срабатывания если есть
-# ignore-vulns = [
-#     "PYSEC-2023-12345"  # Пример: false positive
-# ]
 
 # Форматы вывода
 format = "table"

@@ -30,7 +30,7 @@ GitHub: https://github.com/akula993/django-hlsfield
 """
 
 # Версия пакета (семантическое версионирование)
-__version__ = "1.0.5"
+__version__ = "1.0.6"
 
 # Метаданные пакета
 __title__ = "django-hlsfield"
@@ -46,7 +46,6 @@ __status__ = "Production/Stable"
 
 from django.core.exceptions import ImproperlyConfigured
 
-
 # Исключения для обработки ошибок
 from .exceptions import (
     HLSFieldError,
@@ -57,7 +56,6 @@ from .exceptions import (
     StorageError,
     ConfigurationError,
 )
-
 # Основные поля (главный API)
 from .fields import (
     VideoField,
@@ -69,13 +67,11 @@ from .fields import (
     AdaptiveVideoField,
     AdaptiveVideoFieldFile,
 )
-
 # Валидация и утилиты
 from .fields import (
     validate_ladder,
     get_optimal_ladder_for_resolution,
 )
-
 # Вспомогательные функции
 from .helpers import (
     video_upload_to,

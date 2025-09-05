@@ -26,7 +26,7 @@ from django.db import models
 from django.utils import timezone
 
 from . import defaults, utils
-from .exceptions import InvalidVideoError, StorageError, FFmpegNotFoundError
+from .exceptions import InvalidVideoError, FFmpegNotFoundError
 
 # Настройка логирования
 logger = logging.getLogger(__name__)

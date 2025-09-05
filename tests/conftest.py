@@ -4,9 +4,10 @@ Pytest конфигурация для django-hlsfield тестов
 import os
 import sys
 import tempfile
-import pytest
 from pathlib import Path
+
 import django
+import pytest
 from django.conf import settings
 
 # Добавляем путь к src для импортов

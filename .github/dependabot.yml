@@ -1,1 +1,21 @@
+version: 2
+updates:
+  # Обновление Python зависимостей (requirements.txt, pyproject.toml, setup.cfg)
+  - package-ecosystem: "pip"
+    directory: "/"                # корень репо, где лежит requirements.txt
+    schedule:
+      interval: "weekly"          # раз в неделю
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+
+  # Обновление GitHub Actions (твой ci.yml и release.yml)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "ci"
+      - "dependencies"
 
