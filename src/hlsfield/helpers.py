@@ -19,6 +19,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Union
+from unittest.mock import Mock
 
 from django.core.files.base import File
 from django.core.files.storage import default_storage
@@ -170,7 +171,10 @@ def get_video_upload_path(instance=None, filename: str = None, strategy: str = "
         strategy = "uuid"
 
     upload_func = strategies[strategy]
-
+    if instance is None:
+        instance = Mock()
+        instance._meta = Mock()
+        instance._meta.model_name = "default"
     # Если filename не предоставлен, генерируем временное имя
     if filename is None:
         filename = f"temp_{uuid.uuid4().hex[:8]}.mp4"
@@ -421,7 +425,12 @@ def format_bitrate(bps: int) -> str:
     if bps >= 1_000_000:
         return f"{bps / 1_000_000:.1f} Mbps"
     elif bps >= 1_000:
-        return f"{bps / 1_000:.0f} Kbps"
+        # Исправляем округление
+        kbps = bps / 1_000
+        if kbps.is_integer():
+            return f"{int(kbps)} Kbps"
+        else:
+            return f"{kbps:.1f} Kbps"
     else:
         return f"{bps} bps"
 

@@ -2,7 +2,7 @@ import tempfile
 
 import pytest
 from django.db import models
-from django.test import TestCase
+from django.test import TestCase, SimpleTestCase
 
 from hlsfield import (
     VideoField,
@@ -13,7 +13,7 @@ from hlsfield import (
     get_optimal_ladder_for_resolution
 )
 
-
+# Тестовые модели без маркера pytest.mark.django_db
 class TestVideoModel(models.Model):
     """Тестовая модель для проверки полей"""
     title = models.CharField(max_length=100)
@@ -135,7 +135,8 @@ class TestAdaptiveVideoField(TestCase):
         assert field.dash_manifest_field == "dash"
 
 
-class TestLadderValidation(TestCase):
+# Используем SimpleTestCase для тестов, не требующих базы данных
+class TestLadderValidation(SimpleTestCase):
     """Тесты валидации лестницы качеств"""
 
     def test_valid_ladder(self):
@@ -171,7 +172,7 @@ class TestLadderValidation(TestCase):
         assert "non-empty list" in str(exc.value)
 
 
-class TestOptimalLadder(TestCase):
+class TestOptimalLadder(SimpleTestCase):
     """Тесты генерации оптимальной лестницы"""
 
     def test_optimal_ladder_for_hd(self):

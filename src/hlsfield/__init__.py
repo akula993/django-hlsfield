@@ -135,7 +135,6 @@ def _get_streaming_views():
     except ImportError:
         return {}
 
-
 def _get_analytics():
     """Ленивый импорт аналитики"""
     try:
