@@ -91,10 +91,17 @@ def run(cmd: List[str], timeout_sec: Optional[int] = None) -> subprocess.Complet
         cmd[0] = binary_path
     else:
         # Для других команд просто проверяем что они доступны
-        binary_path = shutil.which(cmd[0])
-        if not binary_path:
-            raise FileNotFoundError(f"Command not found: {cmd[0]}")
-        cmd[0] = binary_path
+        # Специальная обработка для встроенных команд shell (echo, dir, etc.)
+        builtin_commands = ['echo', 'dir', 'type', 'copy', 'move', 'del']
+        
+        if cmd[0].lower() in builtin_commands:
+            # Для встроенных команд используем shell=True в subprocess
+            pass  # Оставляем команду как есть
+        else:
+            binary_path = shutil.which(cmd[0])
+            if not binary_path:
+                raise FileNotFoundError(f"Command not found: {cmd[0]}")
+            cmd[0] = binary_path
 
     if timeout_sec is None:
         timeout_sec = defaults.FFMPEG_TIMEOUT
@@ -103,10 +110,14 @@ def run(cmd: List[str], timeout_sec: Optional[int] = None) -> subprocess.Complet
     logger.debug(f"Executing command: {cmd_str}")
 
     start_time = time.time()
+    
+    # Определяем нужен ли shell для встроенных команд
+    builtin_commands = ['echo', 'dir', 'type', 'copy', 'move', 'del']
+    use_shell = cmd[0].lower() in builtin_commands
 
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout_sec, check=False
+            cmd, capture_output=True, text=True, timeout=timeout_sec, check=False, shell=use_shell
         )
 
         elapsed = time.time() - start_time

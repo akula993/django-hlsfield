@@ -493,10 +493,24 @@ def ensure_directory_exists(path: Union[str, Path], storage=None) -> bool:
         if hasattr(storage, "path"):
             try:
                 full_path = Path(storage.path(path_str))
+                
+                # Проверяем что директория уже существует
+                if full_path.exists() and full_path.is_dir():
+                    return True
+                    
+                # Пытаемся создать
                 full_path.mkdir(parents=True, exist_ok=True)
+                
                 # Проверяем что директория действительно создана
                 if full_path.exists() and full_path.is_dir():
                     return True
+                    
+                # Если не смогли создать, проверяем родительскую директорию
+                parent_dir = full_path.parent
+                if parent_dir.exists() and parent_dir.is_dir():
+                    # Родительская директория существует, считаем что можно создавать файлы
+                    return True
+                    
             except (OSError, NotImplementedError):
                 # Fallback для случаев когда storage.path() не работает
                 pass

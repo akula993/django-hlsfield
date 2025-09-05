@@ -604,7 +604,18 @@ class HLSVideoField(VideoField):
     @property
     def ladder(self):
         """Dynamic ladder property that respects Django settings"""
-        return self._ladder or defaults.DEFAULT_LADDER.copy()
+        if self._ladder is not None:
+            return self._ladder
+        
+        # Динамически получаем DEFAULT_LADDER из Django settings
+        from . import defaults
+        return defaults._get_setting("HLSFIELD_DEFAULT_LADDER", [
+            {"height": 240, "v_bitrate": 300, "a_bitrate": 64},
+            {"height": 360, "v_bitrate": 800, "a_bitrate": 96},
+            {"height": 480, "v_bitrate": 1200, "a_bitrate": 96},
+            {"height": 720, "v_bitrate": 2500, "a_bitrate": 128},
+            {"height": 1080, "v_bitrate": 4500, "a_bitrate": 160},
+        ]).copy()
 
     def contribute_to_class(self, cls, name, **kwargs):
         """Интеграция поля в модель Django"""
@@ -778,7 +789,18 @@ class DASHVideoField(VideoField):
     @property
     def ladder(self):
         """Dynamic ladder property that respects Django settings"""
-        return self._ladder or defaults.DEFAULT_LADDER.copy()
+        if self._ladder is not None:
+            return self._ladder
+        
+        # Динамически получаем DEFAULT_LADDER из Django settings
+        from . import defaults
+        return defaults._get_setting("HLSFIELD_DEFAULT_LADDER", [
+            {"height": 240, "v_bitrate": 300, "a_bitrate": 64},
+            {"height": 360, "v_bitrate": 800, "a_bitrate": 96},
+            {"height": 480, "v_bitrate": 1200, "a_bitrate": 96},
+            {"height": 720, "v_bitrate": 2500, "a_bitrate": 128},
+            {"height": 1080, "v_bitrate": 4500, "a_bitrate": 160},
+        ]).copy()
 
     def contribute_to_class(self, cls, name, **kwargs):
         """Интеграция в модель с post_save обработчиком"""
@@ -952,7 +974,18 @@ class AdaptiveVideoField(VideoField):
     @property
     def ladder(self):
         """Dynamic ladder property that respects Django settings"""
-        return self._ladder or defaults.DEFAULT_LADDER.copy()
+        if self._ladder is not None:
+            return self._ladder
+        
+        # Динамически получаем DEFAULT_LADDER из Django settings
+        from . import defaults
+        return defaults._get_setting("HLSFIELD_DEFAULT_LADDER", [
+            {"height": 240, "v_bitrate": 300, "a_bitrate": 64},
+            {"height": 360, "v_bitrate": 800, "a_bitrate": 96},
+            {"height": 480, "v_bitrate": 1200, "a_bitrate": 96},
+            {"height": 720, "v_bitrate": 2500, "a_bitrate": 128},
+            {"height": 1080, "v_bitrate": 4500, "a_bitrate": 160},
+        ]).copy()
 
     def contribute_to_class(self, cls, name, **kwargs):
         """Интеграция в модель"""
