@@ -1,29 +1,27 @@
 import shutil
-import hlsfield
-import pytest
 import tempfile
-import os
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
+
+import pytest
 from django.test import TestCase
-from django.core.files.base import ContentFile
-from hlsfield.utils import (
-    tempdir,
-    run,
-    ffprobe_streams,
-    pick_video_audio_streams,
-    get_video_info_quick,
-    extract_preview,
-    validate_video_file,
-    pull_to_local,
-    save_tree_to_storage,
-)
+
 from hlsfield.exceptions import (
     FFmpegError,
     FFmpegNotFoundError,
     InvalidVideoError,
     StorageError,
     TimeoutError,
+)
+from hlsfield.utils import (
+    tempdir,
+    run,
+    pick_video_audio_streams,
+    get_video_info_quick,
+    extract_preview,
+    validate_video_file,
+    pull_to_local,
+    save_tree_to_storage,
 )
 
 
@@ -40,7 +38,6 @@ class TestUtils(TestCase):
 
     def tearDown(self):
         """Очистка после тестов"""
-        import shutil
         if self.test_dir.exists():
             shutil.rmtree(self.test_dir)
 
@@ -75,9 +72,12 @@ class TestUtils(TestCase):
         result = run(["echo", "hello"], timeout_sec=5)
         self.assertEqual(result.returncode, 0)
 
+    @patch('hlsfield.utils.ensure_binary_available')
     @patch('hlsfield.utils.subprocess.run')
-    def test_run_with_timeout(self, mock_run):
+    def test_run_with_timeout(self, mock_run, mock_ensure):
         """Тестируем таймауты при выполнении команд"""
+        mock_ensure.return_value = "echo"  # Мокаем проверку бинарника
+
         import subprocess
         mock_run.side_effect = subprocess.TimeoutExpired("test_cmd", 1)
 

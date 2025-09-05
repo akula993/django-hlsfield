@@ -85,8 +85,16 @@ def run(cmd: List[str], timeout_sec: Optional[int] = None) -> subprocess.Complet
     if any(dangerous in str(cmd) for dangerous in ['rm -rf', '>', '>>', '&', '|', ';']):
         raise SecurityError("Potentially dangerous command detected")
 
-    binary_path = ensure_binary_available(cmd[0], cmd[0])
-    cmd[0] = binary_path
+    # Проверяем бинарные файлы только для FFmpeg команд
+    if cmd[0] in [defaults.FFMPEG, defaults.FFPROBE, 'ffmpeg', 'ffprobe']:
+        binary_path = ensure_binary_available(cmd[0], cmd[0])
+        cmd[0] = binary_path
+    else:
+        # Для других команд просто проверяем что они доступны
+        binary_path = shutil.which(cmd[0])
+        if not binary_path:
+            raise FileNotFoundError(f"Command not found: {cmd[0]}")
+        cmd[0] = binary_path
 
     if timeout_sec is None:
         timeout_sec = defaults.FFMPEG_TIMEOUT
@@ -117,7 +125,7 @@ def run(cmd: List[str], timeout_sec: Optional[int] = None) -> subprocess.Complet
 
     except subprocess.TimeoutExpired as e:
         logger.error(f"Command timed out after {timeout_sec}s: {cmd_str}")
-        raise TimeoutError(f"Command timed out after {timeout_sec} seconds") from e
+        raise TimeoutError(f"Command timed out after {timeout_sec} seconds", timeout_sec) from e
 
     except FileNotFoundError as e:
         raise FFmpegNotFoundError(cmd[0]) from e

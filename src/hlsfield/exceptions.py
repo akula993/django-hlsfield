@@ -654,6 +654,7 @@ class TimeoutError(HLSFieldError):
     """Операция превысила таймаут"""
 
     def __init__(self, message: str, timeout_seconds: int, operation: Optional[str] = None):
+
         self.timeout_seconds = timeout_seconds
         self.operation = operation
 

@@ -475,7 +475,7 @@ class TestDjangoIntegrationFunctions(TestCase):
         from django.db import models
         from hlsfield.fields import VideoField, HLSVideoField
 
-        class TestModel(models.Model):
+        class TestModel1(models.Model):
             title = models.CharField(max_length=100)
             video = VideoField(upload_to="videos/")
             hls_video = HLSVideoField(upload_to="hls/")
@@ -484,7 +484,7 @@ class TestDjangoIntegrationFunctions(TestCase):
             class Meta:
                 app_label = 'tests'
 
-        video_fields = get_model_video_fields(TestModel)
+        video_fields = get_model_video_fields(TestModel1)
 
         self.assertEqual(len(video_fields), 2)
         self.assertIn("video", video_fields)
@@ -496,13 +496,13 @@ class TestDjangoIntegrationFunctions(TestCase):
         """Тестируем получение метаданных video поля"""
         from django.db import models
 
-        class TestModel(models.Model):
+        class TestModel2(models.Model):
             video = models.FileField(upload_to="videos/")
 
             class Meta:
                 app_label = 'tests'
 
-        instance = TestModel()
+        instance = TestModel2()
         instance.video = Mock()
         instance.video.name = "videos/test.mp4"
         instance.video.url = "/media/videos/test.mp4"
@@ -526,13 +526,13 @@ class TestDjangoIntegrationFunctions(TestCase):
         """Тестируем получение метаданных для пустого поля"""
         from django.db import models
 
-        class TestModel(models.Model):
+        class TestModel3(models.Model):
             video = models.FileField(upload_to="videos/", blank=True, null=True)
 
             class Meta:
                 app_label = 'tests'
 
-        instance = TestModel()
+        instance = TestModel3()
         instance.video = None
 
         metadata = get_video_field_metadata(instance, "video")

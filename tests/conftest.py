@@ -63,6 +63,15 @@ def mock_ffmpeg(monkeypatch):
 
     def mock_run(cmd, *args, **kwargs):
         # Эмулируем разные команды
+        # Проверка на timeout команды
+        if 'sleep' in str(cmd) or 'timeout' in str(cmd):
+            import subprocess
+            raise subprocess.TimeoutExpired(' '.join(cmd), 1)
+
+        # Для echo команд
+        if len(cmd) > 0 and ('echo' in cmd[0] or 'echo' in str(cmd)):
+            return CompletedProcess(args=cmd, returncode=0, stdout='hello', stderr='')
+
         if len(cmd) > 0 and 'ffprobe' in cmd[0]:
             output = '''{
                 "streams": [

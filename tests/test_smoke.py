@@ -249,7 +249,7 @@ class TestDjangoIntegration(TestCase):
 
             class Meta:
                 app_label = 'tests'
-
+                db_table = 'test_video_unique'  # Уникальное имя таблицы
         # Модель создается без ошибок
         self.assertTrue(hasattr(TestModel, 'video'))
 

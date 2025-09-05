@@ -597,9 +597,14 @@ class HLSVideoField(VideoField):
         # HLS специфичные параметры
         self.hls_playlist_field = hls_playlist_field
         self.hls_base_subdir = hls_base_subdir or defaults.HLS_SUBDIR
-        self.ladder = ladder or defaults.DEFAULT_LADDER.copy()
+        self._ladder = ladder  # Храним оригинальный ladder, None если не задан
         self.segment_duration = segment_duration or defaults.SEGMENT_DURATION
         self.hls_on_save = hls_on_save
+
+    @property
+    def ladder(self):
+        """Dynamic ladder property that respects Django settings"""
+        return self._ladder or defaults.DEFAULT_LADDER.copy()
 
     def contribute_to_class(self, cls, name, **kwargs):
         """Интеграция поля в модель Django"""
@@ -669,8 +674,8 @@ class HLSVideoField(VideoField):
             kwargs["hls_playlist_field"] = self.hls_playlist_field
         if self.hls_base_subdir != defaults.HLS_SUBDIR:
             kwargs["hls_base_subdir"] = self.hls_base_subdir
-        if self.ladder != defaults.DEFAULT_LADDER:
-            kwargs["ladder"] = self.ladder
+        if self._ladder is not None:
+            kwargs["ladder"] = self._ladder
         if self.segment_duration != defaults.SEGMENT_DURATION:
             kwargs["segment_duration"] = self.segment_duration
         if not self.hls_on_save:
@@ -766,9 +771,14 @@ class DASHVideoField(VideoField):
 
         self.dash_manifest_field = dash_manifest_field
         self.dash_base_subdir = dash_base_subdir or defaults.DASH_SUBDIR
-        self.ladder = ladder or defaults.DEFAULT_LADDER.copy()
+        self._ladder = ladder  # Храним оригинальный ladder, None если не задан
         self.segment_duration = segment_duration or defaults.DASH_SEGMENT_DURATION
         self.dash_on_save = dash_on_save
+
+    @property
+    def ladder(self):
+        """Dynamic ladder property that respects Django settings"""
+        return self._ladder or defaults.DEFAULT_LADDER.copy()
 
     def contribute_to_class(self, cls, name, **kwargs):
         """Интеграция в модель с post_save обработчиком"""
@@ -823,8 +833,8 @@ class DASHVideoField(VideoField):
             kwargs["dash_manifest_field"] = self.dash_manifest_field
         if self.dash_base_subdir != defaults.DASH_SUBDIR:
             kwargs["dash_base_subdir"] = self.dash_base_subdir
-        if self.ladder != defaults.DEFAULT_LADDER:
-            kwargs["ladder"] = self.ladder
+        if self._ladder is not None:
+            kwargs["ladder"] = self._ladder
         if self.segment_duration != defaults.DASH_SEGMENT_DURATION:
             kwargs["segment_duration"] = self.segment_duration
         if not self.dash_on_save:
@@ -935,9 +945,14 @@ class AdaptiveVideoField(VideoField):
         self.hls_playlist_field = hls_playlist_field
         self.dash_manifest_field = dash_manifest_field
         self.adaptive_base_subdir = adaptive_base_subdir or defaults.ADAPTIVE_SUBDIR
-        self.ladder = ladder or defaults.DEFAULT_LADDER.copy()
+        self._ladder = ladder  # Храним оригинальный ladder, None если не задан
         self.segment_duration = segment_duration or defaults.SEGMENT_DURATION
         self.adaptive_on_save = adaptive_on_save
+
+    @property
+    def ladder(self):
+        """Dynamic ladder property that respects Django settings"""
+        return self._ladder or defaults.DEFAULT_LADDER.copy()
 
     def contribute_to_class(self, cls, name, **kwargs):
         """Интеграция в модель"""
@@ -996,8 +1011,8 @@ class AdaptiveVideoField(VideoField):
             kwargs["dash_manifest_field"] = self.dash_manifest_field
         if self.adaptive_base_subdir != defaults.ADAPTIVE_SUBDIR:
             kwargs["adaptive_base_subdir"] = self.adaptive_base_subdir
-        if self.ladder != defaults.DEFAULT_LADDER:
-            kwargs["ladder"] = self.ladder
+        if self._ladder is not None:
+            kwargs["ladder"] = self._ladder
         if self.segment_duration != defaults.SEGMENT_DURATION:
             kwargs["segment_duration"] = self.segment_duration
         if not self.adaptive_on_save:

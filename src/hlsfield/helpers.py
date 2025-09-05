@@ -491,11 +491,12 @@ def ensure_directory_exists(path: Union[str, Path], storage=None) -> bool:
     try:
         # Для локального storage
         if hasattr(storage, "path"):
-
             try:
                 full_path = Path(storage.path(path_str))
                 full_path.mkdir(parents=True, exist_ok=True)
-                return True
+                # Проверяем что директория действительно создана
+                if full_path.exists() and full_path.is_dir():
+                    return True
             except (OSError, NotImplementedError):
                 # Fallback для случаев когда storage.path() не работает
                 pass
@@ -505,7 +506,7 @@ def ensure_directory_exists(path: Union[str, Path], storage=None) -> bool:
         if not storage.exists(test_file):
             from io import BytesIO
             storage.save(test_file, BytesIO(b''))
-
+        
         return True
 
     except Exception:
