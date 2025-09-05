@@ -31,10 +31,13 @@ def django_db_setup():
         'NAME': ':memory:',
     }
 
+
 @pytest.fixture(autouse=True)
-def enable_db_access_for_all_tests(django_db_setup):
+def enable_db_access_for_all_tests(db):
     """Разрешаем доступ к БД для всех тестов"""
     pass
+
+
 @pytest.fixture
 def temp_video_file():
     """Создает временный видео файл для тестов"""
@@ -51,6 +54,7 @@ def temp_video_file():
         path.unlink()
     except:
         pass
+
 
 @pytest.fixture
 def mock_ffmpeg(monkeypatch):
@@ -93,11 +97,14 @@ def mock_ffmpeg(monkeypatch):
     def mock_ensure_binary(binary_name, path):
         # Для несуществующих команд
         if 'nonexistent' in path:
-            raise FileNotFoundError(f"Command not found: {path}")
+            from hlsfield.exceptions import FFmpegNotFoundError
+            raise FFmpegNotFoundError(f"Command not found: {path}")
         return path  # Всегда возвращаем путь как есть
 
     monkeypatch.setattr('hlsfield.utils.run', mock_run)
     monkeypatch.setattr('hlsfield.utils.ensure_binary_available', mock_ensure_binary)
+
+
 @pytest.fixture
 def temp_storage():
     """Создает временное хранилище для тестов"""
@@ -123,11 +130,6 @@ def sample_ladder():
     ]
 
 
-# Автоматически помечаем все тесты как требующие базу данных
-def pytest_collection_modifyitems(items):
-    for item in items:
-        if hasattr(item, 'fixturenames') and 'django_db' not in item.fixturenames:
-            item.add_marker(pytest.mark.django_db)
 @pytest.fixture
 def mock_video_file():
     """Создает mock видео файла для тестов"""
@@ -136,6 +138,7 @@ def mock_video_file():
     video_file.url = "/media/test_video.mp4"
     video_file.metadata = Mock(return_value={"duration": 120, "width": 1920})
     return video_file
+
 
 @pytest.fixture
 def mock_model_instance():
