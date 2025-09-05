@@ -156,25 +156,31 @@ urlpatterns = [
     path("api/video-analytics/", VideoAnalyticsView.as_view(), name="video_analytics"),
 ]
 
+try:
 
-# Django Admin (упрощенный)
-from django.contrib import admin
+    # Django Admin (упрощенный)
+    from django.contrib import admin
 
 
-@admin.register(VideoEvent)
-class VideoEventAdmin(admin.ModelAdmin):
-    list_display = ["video_id", "event_type", "current_time", "quality", "timestamp"]
-    list_filter = ["event_type", "quality", "timestamp"]
-    search_fields = ["video_id", "session_id"]
-    readonly_fields = ["timestamp"]
-    date_hierarchy = "timestamp"
+    @admin.register(VideoEvent)
+    class VideoEventAdmin(admin.ModelAdmin):
+        list_display = ["video_id", "event_type", "current_time", "quality", "timestamp"]
+        list_filter = ["event_type", "quality", "timestamp"]
+        search_fields = ["video_id", "session_id"]
+        readonly_fields = ["timestamp"]
+        date_hierarchy = "timestamp"
 
-    def get_queryset(self, request):
-        # Показываем только события за последние 7 дней
-        qs = super().get_queryset(request)
-        if not request.GET.get("timestamp__gte"):
-            from datetime import timedelta
+        def get_queryset(self, request):
+            # Показываем только события за последние 7 дней
+            qs = super().get_queryset(request)
+            if not request.GET.get("timestamp__gte"):
+                from datetime import timedelta
 
-            seven_days_ago = timezone.now() - timedelta(days=7)
-            qs = qs.filter(timestamp__gte=seven_days_ago)
-        return qs
+                seven_days_ago = timezone.now() - timedelta(days=7)
+                qs = qs.filter(timestamp__gte=seven_days_ago)
+            return qs
+
+
+except (ImportError, LookupError):
+    # Пропускаем регистрацию если admin недоступен
+    pass

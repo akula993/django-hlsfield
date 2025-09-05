@@ -13,8 +13,9 @@ SECRET_KEY = 'test-secret-key-for-django-hlsfield-testing'
 DEBUG = True
 ALLOWED_HOSTS = ['*']
 
-# Application definition
+# Application definition - ДОБАВЛЕНО django.contrib.admin
 INSTALLED_APPS = [
+    'django.contrib.admin',  # ← ДОБАВЛЕНО
     'django.contrib.contenttypes',
     'django.contrib.auth',
     'django.contrib.sessions',
