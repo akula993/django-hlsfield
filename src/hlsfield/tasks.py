@@ -63,7 +63,11 @@ def _resolve_field(instance, field_name: str):
 def _get_base_key(name: str, subdir: str) -> str:
     """Генерирует базовый ключ для выходных файлов"""
     base, _ext = os.path.splitext(name)
-    return f"{base}/{subdir}/"
+    result = f"{base}/{subdir}/"
+    
+    # Add debugging to track path generation
+    logger.debug(f"Generated base_key: '{result}' from name='{name}', subdir='{subdir}'")
+    return result
 
 
 def _update_instance_status(instance, status: str, **extra_fields):
@@ -257,7 +261,7 @@ def build_dash_for_field_sync(model_label: str, pk: int | str, field_name: str):
                 segment_duration=segment_duration,
             )
 
-            base_key = _get_base_key(name, getattr(field, "dash_base_subdir", "dash"))
+            base_key = _get_base_key(name, getattr(field, "dash_base_subdir", defaults.DASH_SUBDIR))
             utils.save_tree_to_storage(local_dash_root, storage, base_key)
 
             manifest_key = base_key + manifest.name
@@ -342,7 +346,7 @@ def build_adaptive_for_field_sync(model_label: str, pk: int | str, field_name: s
                 segment_duration=segment_duration,
             )
 
-            base_key = _get_base_key(name, getattr(field, "adaptive_base_subdir", "adaptive"))
+            base_key = _get_base_key(name, getattr(field, "adaptive_base_subdir", defaults.ADAPTIVE_SUBDIR))
             utils.save_tree_to_storage(local_adaptive_root, storage, base_key)
 
             hls_master_key = base_key + f"hls/{results['hls_master'].name}"
@@ -488,7 +492,7 @@ def _build_single_quality(
         )
 
         # Загружаем в storage
-        base_key = _get_base_key(name, getattr(field, "adaptive_base_subdir", "adaptive"))
+        base_key = _get_base_key(name, getattr(field, "adaptive_base_subdir", defaults.ADAPTIVE_SUBDIR))
         utils.save_tree_to_storage(adaptive_root, storage, base_key)
 
         hls_master_key = base_key + f"hls/{results['hls_master'].name}"
