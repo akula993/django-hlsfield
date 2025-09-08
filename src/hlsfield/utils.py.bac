@@ -21,16 +21,13 @@ import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union, Tuple
-from enum import Enum
-
+from typing import Any, Dict, List, Optional, Union
 # Замените строку 26 в utils.py:
 try:
     from celery.exceptions import SecurityError
 except ImportError:
     class SecurityError(Exception):
         pass
-
 from . import defaults
 from .exceptions import (
     FFmpegError,
@@ -329,107 +326,76 @@ def extract_preview(
 
 
 # ==============================================================================
-# ОПТИМИЗИРОВАННЫЙ ТРАНСКОДИНГ - НОВЫЙ КОД
+# HLS ТРАНСКОДИНГ
 # ==============================================================================
 
-class StreamFormat(Enum):
-    HLS = "hls"
-    DASH = "dash"
 
-class TranscodingConfig:
-    """Конфигурация для транскодирования"""
-    def __init__(self, format_type: StreamFormat, segment_duration: int = 6):
-        self.format_type = format_type
-        self.segment_duration = segment_duration
+def transcode_hls_variants(
+    input_path: Path, out_dir: Path, ladder: List[Dict], segment_duration: int = 6
+) -> Path:
+    """Создает HLS адаптивный стрим"""
+    try:
+        from .fields import validate_ladder
 
-        # Настройки по умолчанию для каждого формата
-        if format_type == StreamFormat.HLS:
-            self.segment_duration = segment_duration
-            self.file_extension = "ts"
-            self.container_format = "hls"
-            self.segment_type = "mpegts"
-        elif format_type == StreamFormat.DASH:
-            self.segment_duration = max(2, segment_duration - 2)
-            self.file_extension = "m4s"
-            self.container_format = "dash"
-            self.segment_type = "mp4"
+        validate_ladder(ladder)
 
-def _prepare_transcoding(input_path: Path, ladder: List[Dict]) -> Tuple[Dict, Dict, int, List[Dict]]:
-    """Общая подготовка для любого типа транскодирования"""
-    from .fields import validate_ladder
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-    validate_ladder(ladder)
+        logger.info(f"Analyzing input video: {input_path}")
+        info = ffprobe_streams(input_path)
+        video_stream, audio_stream = pick_video_audio_streams(info)
 
-    info = ffprobe_streams(input_path)
-    video_stream, audio_stream = pick_video_audio_streams(info)
+        if not video_stream:
+            raise InvalidVideoError("No video stream found in input file")
 
-    if not video_stream:
-        raise InvalidVideoError("No video stream found in input file")
+        has_audio = audio_stream is not None
+        source_height = int(video_stream.get("height", 0))
 
-    has_audio = audio_stream is not None
-    source_height = int(video_stream.get("height", 0))
-    filtered_ladder = _filter_ladder_by_source(ladder, source_height)
+        filtered_ladder = _filter_ladder_by_source(ladder, source_height)
+        logger.info(f"Transcoding {len(filtered_ladder)} HLS variants")
 
-    return video_stream, audio_stream, source_height, filtered_ladder
+        variant_infos = []
 
-def _build_base_ffmpeg_command(
-    input_path: Path,
-    rung: Dict,
-    has_audio: bool,
-    config: TranscodingConfig
-) -> List[str]:
-    """Строит базовую команду FFmpeg, общую для HLS и DASH"""
-    height = int(rung["height"])
-    v_bitrate = int(rung["v_bitrate"])
-    a_bitrate = int(rung["a_bitrate"]) if has_audio else 0
+        for rung in filtered_ladder:
+            try:
+                variant_info = _create_hls_variant(
+                    input_path, out_dir, rung, segment_duration, has_audio
+                )
+                variant_infos.append(variant_info)
+                logger.info(f"Created HLS variant: {variant_info['height']}p")
 
-    cmd = [
-        defaults.FFMPEG,
-        "-y",
-        "-i", str(input_path),
-        "-map", "0:v:0",
-    ]
+            except Exception as e:
+                logger.error(f"Failed to create {rung['height']}p HLS variant: {e}")
+                continue
 
-    # Видео фильтры и кодирование
-    vf_parts = [
-        f"scale=w=-2:h={height}:force_original_aspect_ratio=decrease",
-        "pad=ceil(iw/2)*2:ceil(ih/2)*2",
-    ]
+        if not variant_infos:
+            raise TranscodingError("No HLS variants were successfully created")
 
-    cmd.extend([
-        "-vf", ",".join(vf_parts),
-        "-c:v", "libx264",
-        "-profile:v", defaults.H264_PROFILE,
-        "-preset", defaults.FFMPEG_PRESET,
-        "-b:v", f"{v_bitrate}k",
-        "-maxrate", f"{int(v_bitrate * 1.07)}k",
-        "-bufsize", f"{v_bitrate * 2}k",
-        "-pix_fmt", defaults.PIXEL_FORMAT,
-        "-g", str(config.segment_duration * 30),
-        "-keyint_min", str(config.segment_duration * 30),
-        "-sc_threshold", "0",
-    ])
+        master_playlist = _create_hls_master_playlist(out_dir, variant_infos)
+        logger.info(f"HLS master playlist created: {master_playlist}")
 
-    # Аудио
-    if has_audio and a_bitrate > 0:
-        cmd.extend([
-            "-map", "0:a:0",
-            "-c:a", defaults.AUDIO_CODEC,
-            "-b:a", f"{a_bitrate}k",
-            "-ac", str(defaults.AUDIO_CHANNELS),
-            "-ar", str(defaults.AUDIO_SAMPLE_RATE),
-        ])
-    else:
-        cmd.append("-an")
+        return master_playlist
 
-    return cmd
+    except Exception as e:
+        logger.error(f"HLS transcoding failed: {e}")
+        if isinstance(e, (TranscodingError, ConfigurationError, InvalidVideoError)):
+            raise
+        raise TranscodingError(f"HLS transcoding failed: {e}") from e
+
+
+def _filter_ladder_by_source(ladder: List[Dict], source_height: int) -> List[Dict]:
+    """Фильтрует лестницу качеств по исходному разрешению"""
+    filtered = [r for r in ladder if r["height"] <= source_height * 1.1]
+
+    if not filtered:
+        filtered = [min(ladder, key=lambda x: x["height"])]
+        logger.warning(f"All ladder heights exceed source {source_height}p, using lowest")
+
+    return sorted(filtered, key=lambda x: x["height"])
+
 
 def _create_hls_variant(
-    input_path: Path,
-    out_dir: Path,
-    rung: Dict,
-    config: TranscodingConfig,
-    has_audio: bool
+    input_path: Path, out_dir: Path, rung: Dict, segment_duration: int, has_audio: bool
 ) -> Dict:
     """Создает один вариант качества HLS"""
     height = int(rung["height"])
@@ -440,23 +406,88 @@ def _create_hls_variant(
     variant_dir.mkdir(exist_ok=True)
     playlist_file = variant_dir / "index.m3u8"
 
-    # Базовая команда
-    cmd = _build_base_ffmpeg_command(input_path, rung, has_audio, config)
+    cmd = [
+        defaults.FFMPEG,
+        "-y",
+        "-i",
+        str(input_path),
+        "-map",
+        "0:v:0",
+    ]
 
-    # HLS-специфичные параметры
-    cmd.extend([
-        "-f", "hls",
-        "-hls_time", str(config.segment_duration),
-        "-hls_playlist_type", "vod",
-        "-hls_segment_type", "mpegts",
-        "-hls_segment_filename", str(variant_dir / "seg_%04d.ts"),
-        "-hls_flags", "single_file+independent_segments",
-        str(playlist_file),
-    ])
+    # Видео фильтры
+    vf_parts = [
+        f"scale=w=-2:h={height}:force_original_aspect_ratio=decrease",
+        "pad=ceil(iw/2)*2:ceil(ih/2)*2",
+    ]
+
+    cmd.extend(
+        [
+            "-vf",
+            ",".join(vf_parts),
+            "-c:v",
+            "libx264",
+            "-profile:v",
+            defaults.H264_PROFILE,
+            "-preset",
+            defaults.FFMPEG_PRESET,
+            "-b:v",
+            f"{v_bitrate}k",
+            "-maxrate",
+            f"{int(v_bitrate * 1.07)}k",
+            "-bufsize",
+            f"{v_bitrate * 2}k",
+            "-pix_fmt",
+            defaults.PIXEL_FORMAT,
+            "-g",
+            str(segment_duration * 30),
+            "-keyint_min",
+            str(segment_duration * 30),
+            "-sc_threshold",
+            "0",
+        ]
+    )
+
+    # Аудио
+    if has_audio and a_bitrate > 0:
+        cmd.extend(
+            [
+                "-map",
+                "0:a:0",
+                "-c:a",
+                defaults.AUDIO_CODEC,
+                "-b:a",
+                f"{a_bitrate}k",
+                "-ac",
+                str(defaults.AUDIO_CHANNELS),
+                "-ar",
+                str(defaults.AUDIO_SAMPLE_RATE),
+            ]
+        )
+    else:
+        cmd.append("-an")
+
+    # HLS параметры
+    cmd.extend(
+        [
+            "-f",
+            "hls",
+            "-hls_time",
+            str(segment_duration),
+            "-hls_playlist_type",
+            "vod",
+            "-hls_segment_type",
+            "mpegts",
+            "-hls_segment_filename",
+            str(variant_dir / "seg_%04d.ts"),
+            "-hls_flags",
+            "single_file+independent_segments",
+            str(playlist_file),
+        ]
+    )
 
     run(cmd, timeout_sec=600)
 
-    # Валидация результата
     if not playlist_file.exists():
         raise TranscodingError(f"HLS playlist not created: {playlist_file}")
 
@@ -476,77 +507,13 @@ def _create_hls_variant(
         "segments_count": len(segment_files),
     }
 
-def _create_dash_variants(
-    input_path: Path,
-    out_dir: Path,
-    filtered_ladder: List[Dict],
-    config: TranscodingConfig,
-    has_audio: bool
-) -> Path:
-    """Создает все варианты DASH одной командой"""
-    manifest_file = out_dir / "manifest.mpd"
 
-    cmd = [defaults.FFMPEG, "-y", "-i", str(input_path)]
-
-    # Для каждого качества создаем отдельный поток
-    for i, rung in enumerate(filtered_ladder):
-        height = int(rung["height"])
-        v_bitrate = int(rung["v_bitrate"])
-
-        cmd.extend([
-            "-map", "0:v:0",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-profile:v", "main",
-            "-b:v", f"{v_bitrate}k",
-            "-maxrate", f"{int(v_bitrate * 1.07)}k",
-            "-bufsize", f"{v_bitrate * 2}k",
-            "-vf", f"scale=-2:{height}",
-            "-pix_fmt", "yuv420p",
-        ])
-
-        if has_audio:
-            a_bitrate = int(rung["a_bitrate"])
-            cmd.extend([
-                "-map", "0:a:0",
-                "-c:a", "aac",
-                "-b:a", f"{a_bitrate}k",
-                "-ac", "2",
-                "-ar", "48000",
-            ])
-
-    # DASH параметры
-    cmd.extend([
-        "-f", "dash",
-        "-seg_duration", str(config.segment_duration),
-        "-use_template", "1",
-        "-use_timeline", "1",
-        "-init_seg_name", str(out_dir / "init_$RepresentationID$.m4s"),
-        "-media_seg_name", str(out_dir / "chunk_$RepresentationID$_$Number%05d$.m4s"),
-        "-adaptation_sets", "id=0,streams=v id=1,streams=a" if has_audio else "id=0,streams=v",
-        str(manifest_file)
-    ])
-
-    run(cmd, timeout_sec=900)
-
-    # Валидация результата
-    if not manifest_file.exists():
-        raise TranscodingError("DASH manifest not created")
-
-    segment_files = list(out_dir.glob("chunk_*.m4s"))
-    init_files = list(out_dir.glob("init_*.m4s"))
-
-    if not segment_files and not init_files:
-        raise TranscodingError("No DASH segments created")
-
-    logger.info(f"DASH created with {len(segment_files)} segments and {len(init_files)} init files")
-    return manifest_file
-
-def _create_master_playlist(out_dir: Path, variants: List[Dict]) -> Path:
-    """Создает master.m3u8 плейлист для HLS"""
+def _create_hls_master_playlist(out_dir: Path, variants: List[Dict]) -> Path:
+    """Создает master.m3u8 плейлист"""
     master_file = out_dir / "master.m3u8"
 
     lines = ["#EXTM3U", "#EXT-X-VERSION:3"]
+
     sorted_variants = sorted(variants, key=lambda x: x["height"])
 
     for variant in sorted_variants:
@@ -556,91 +523,125 @@ def _create_master_playlist(out_dir: Path, variants: List[Dict]) -> Path:
 
         lines.append(stream_inf)
         lines.append(f"{variant['dir']}/{variant['playlist']}")
-
     master_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return master_file
 
-def transcode_variants(
-    input_path: Path,
-    out_dir: Path,
-    ladder: List[Dict],
-    format_type: StreamFormat,
-    segment_duration: int = 6
-) -> Path:
-    """Универсальная функция транскодирования для HLS или DASH"""
-    try:
-        config = TranscodingConfig(format_type, segment_duration)
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        logger.info(f"Analyzing input video: {input_path}")
-        video_stream, audio_stream, source_height, filtered_ladder = _prepare_transcoding(input_path, ladder)
-
-        has_audio = audio_stream is not None
-        logger.info(f"Transcoding {len(filtered_ladder)} {format_type.value.upper()} variants")
-
-        if format_type == StreamFormat.HLS:
-            return _transcode_hls(input_path, out_dir, filtered_ladder, config, has_audio)
-        elif format_type == StreamFormat.DASH:
-            return _transcode_dash(input_path, out_dir, filtered_ladder, config, has_audio)
-
-    except Exception as e:
-        logger.error(f"{format_type.value.upper()} transcoding failed: {e}")
-        if isinstance(e, (TranscodingError, ConfigurationError, InvalidVideoError)):
-            raise
-        raise TranscodingError(f"{format_type.value.upper()} transcoding failed: {e}") from e
-
-def _transcode_hls(
-    input_path: Path,
-    out_dir: Path,
-    filtered_ladder: List[Dict],
-    config: TranscodingConfig,
-    has_audio: bool
-) -> Path:
-    """Внутренняя функция для HLS транскодирования"""
-    variant_infos = []
-
-    for rung in filtered_ladder:
-        try:
-            variant_info = _create_hls_variant(input_path, out_dir, rung, config, has_audio)
-            variant_infos.append(variant_info)
-            logger.info(f"Created HLS variant: {variant_info['height']}p")
-        except Exception as e:
-            logger.error(f"Failed to create {rung['height']}p HLS variant: {e}")
-            continue
-
-    if not variant_infos:
-        raise TranscodingError("No HLS variants were successfully created")
-
-    master_playlist = _create_master_playlist(out_dir, variant_infos)
-    logger.info(f"HLS master playlist created: {master_playlist}")
-    return master_playlist
-
-def _transcode_dash(
-    input_path: Path,
-    out_dir: Path,
-    filtered_ladder: List[Dict],
-    config: TranscodingConfig,
-    has_audio: bool
-) -> Path:
-    """Внутренняя функция для DASH транскодирования"""
-    return _create_dash_variants(input_path, out_dir, filtered_ladder, config, has_audio)
-
 
 # ==============================================================================
-# ПУБЛИЧНЫЕ ФУНКЦИИ (обратная совместимость)
+# DASH ТРАНСКОДИНГ
 # ==============================================================================
-
-def transcode_hls_variants(
-    input_path: Path, out_dir: Path, ladder: List[Dict], segment_duration: int = 6
-) -> Path:
-    """Создает HLS адаптивный стрим"""
-    return transcode_variants(input_path, out_dir, ladder, StreamFormat.HLS, segment_duration)
 
 def transcode_dash_variants(
     input_path: Path, out_dir: Path, ladder: List[Dict], segment_duration: int = 4
 ) -> Path:
     """Создает DASH адаптивный стрим"""
-    return transcode_variants(input_path, out_dir, ladder, StreamFormat.DASH, segment_duration)
+
+    try:
+        from .fields import validate_ladder
+
+        validate_ladder(ladder)
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        info = ffprobe_streams(input_path)
+        video_stream, audio_stream = pick_video_audio_streams(info)
+
+        if not video_stream:
+            raise InvalidVideoError("No video stream found")
+
+        has_audio = audio_stream is not None
+        source_height = int(video_stream.get("height", 0))
+        filtered_ladder = _filter_ladder_by_source(ladder, source_height)
+
+        logger.info(f"Creating DASH with {len(filtered_ladder)} representations")
+
+        # Простая команда для тестирования DASH
+        manifest_file = out_dir / "manifest.mpd"
+
+        cmd = [
+            defaults.FFMPEG,
+            "-y",
+            "-i", str(input_path),
+        ]
+
+        # Для каждого качества создаем отдельный поток
+        for i, rung in enumerate(filtered_ladder):
+            height = int(rung["height"])
+            v_bitrate = int(rung["v_bitrate"])
+
+            cmd.extend([
+                "-map", "0:v:0",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-profile:v", "main",
+                "-b:v", f"{v_bitrate}k",
+                "-maxrate", f"{int(v_bitrate * 1.07)}k",
+                "-bufsize", f"{v_bitrate * 2}k",
+                "-vf", f"scale=-2:{height}",
+                "-pix_fmt", "yuv420p",
+            ])
+
+            if has_audio:
+                a_bitrate = int(rung["a_bitrate"])
+                cmd.extend([
+                    "-map", "0:a:0",
+                    "-c:a", "aac",
+                    "-b:a", f"{a_bitrate}k",
+                    "-ac", "2",
+                    "-ar", "48000",
+                ])
+
+        # Базовые параметры DASH
+        cmd.extend([
+            "-f", "dash",
+            "-seg_duration", str(segment_duration),
+            "-use_template", "1",
+            "-use_timeline", "1",
+            "-init_seg_name", str(out_dir / "init_$RepresentationID$.m4s"),
+            "-media_seg_name", str(out_dir / "chunk_$RepresentationID$_$Number%05d$.m4s"),
+            "-adaptation_sets", "id=0,streams=v id=1,streams=a" if has_audio else "id=0,streams=v",
+            str(manifest_file)
+        ])
+
+        logger.debug(f"DASH command: {' '.join(cmd)}")
+        run(cmd, timeout_sec=900)
+
+        # Проверяем результат
+        if not manifest_file.exists():
+            raise TranscodingError("DASH manifest not created")
+
+        # Ищем сегменты с правильными паттернами
+        segment_files = list(out_dir.glob("chunk_*.m4s"))
+        init_files = list(out_dir.glob("init_*.m4s"))
+        
+        logger.debug(f"Found {len(segment_files)} segment files and {len(init_files)} init files")
+        logger.debug(f"All files in output dir: {[f.name for f in out_dir.glob('*')]}")
+        
+        # Объединяем все найденные файлы
+        all_dash_files = segment_files + init_files
+
+        if not all_dash_files:
+            # Посмотрим что вообще есть в директории
+            all_files = list(out_dir.glob("*"))
+            logger.warning(f"No DASH files found. All files in output dir: {[f.name for f in all_files]}")
+            raise TranscodingError("No DASH segments created")
+
+        logger.info(f"DASH successfully created with {len(segment_files)} segments and {len(init_files)} init files")
+        
+        # Очищаем лишние файлы из текущей директории (если они там остались)
+        _cleanup_dash_files_from_current_dir()
+        
+        return manifest_file
+
+    except Exception as e:
+        logger.error(f"DASH transcoding failed: {e}")
+        if isinstance(e, (TranscodingError, ConfigurationError, InvalidVideoError)):
+            raise
+        raise TranscodingError(f"DASH transcoding failed: {e}") from e
+# ==============================================================================
+# КОМБИНИРОВАННЫЙ HLS + DASH
+# ==============================================================================
+
 
 def transcode_adaptive_variants(
     input_path: Path, out_dir: Path, ladder: List[Dict], segment_duration: int = 6
@@ -656,12 +657,12 @@ def transcode_adaptive_variants(
 
         # Создаем HLS
         logger.info("Creating HLS stream...")
-        hls_master = transcode_variants(input_path, hls_dir, ladder, StreamFormat.HLS, segment_duration)
+        hls_master = transcode_hls_variants(input_path, hls_dir, ladder, segment_duration)
 
         # Создаем DASH
         logger.info("Creating DASH stream...")
         dash_segment_duration = max(2, segment_duration - 2)
-        dash_manifest = transcode_variants(input_path, dash_dir, ladder, StreamFormat.DASH, dash_segment_duration)
+        dash_manifest = transcode_dash_variants(input_path, dash_dir, ladder, dash_segment_duration)
 
         logger.info("Adaptive transcoding completed successfully")
 
@@ -677,36 +678,6 @@ def transcode_adaptive_variants(
         if isinstance(e, (TranscodingError, ConfigurationError, InvalidVideoError)):
             raise
         raise TranscodingError(f"Adaptive transcoding failed: {e}") from e
-
-
-# ==============================================================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-# ==============================================================================
-
-def _filter_ladder_by_source(ladder: List[Dict], source_height: int) -> List[Dict]:
-    """Фильтрует лестницу качеств по исходному разрешению"""
-    filtered = [r for r in ladder if r["height"] <= source_height * 1.1]
-
-    if not filtered:
-        filtered = [min(ladder, key=lambda x: x["height"])]
-        logger.warning(f"All ladder heights exceed source {source_height}p, using lowest")
-
-    return sorted(filtered, key=lambda x: x["height"])
-
-def _cleanup_dash_files_from_current_dir():
-    """Очищает лишние DASH файлы из текущей директории"""
-    # Заглушка для совместимости с существующим кодом
-    pass
-
-def analyze_video_complexity(input_path: Path) -> Dict[str, Any]:
-    """Анализирует сложность видео для оптимизации битрейта"""
-    # Заглушка для функции из tasks.py
-    return {
-        "duration": 0,
-        "complexity": "medium",
-        "motion_level": 0.5,
-        "detail_level": 0.5,
-    }
 
 
 # ==============================================================================

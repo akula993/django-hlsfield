@@ -62,10 +62,13 @@ def _resolve_field(instance, field_name: str):
 
 def _get_base_key(name: str, subdir: str) -> str:
     """Генерирует базовый ключ для выходных файлов"""
+    # Убираем расширение из исходного файла
     base, _ext = os.path.splitext(name)
+
+    # Создаем правильную структуру:
+    # videos/folder/filename/subdir/
     result = f"{base}/{subdir}/"
-    
-    # Add debugging to track path generation
+
     logger.debug(f"Generated base_key: '{result}' from name='{name}', subdir='{subdir}'")
     return result
 
